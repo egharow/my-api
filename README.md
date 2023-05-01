@@ -13,7 +13,7 @@ This sample includes:
 * appspec.yml - this file is used by AWS CodeDeploy when deploying the web
   application to EC2
 * buildspec.yml - this file is used by AWS CodeBuild to build and test
-  your application
+  your applicationgit config --global user.email
 * requirements.txt - this file is used install Python dependencies needed by
   the Flask application
 * setup.py - this file is used by Python's setuptools library to describe how

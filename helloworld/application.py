@@ -13,5 +13,9 @@ def get():
 def post():
     return Response(json.dumps({'Output': 'Hello World'}), mimetype='application/json', status=200)
 
+@application.route('/check', methods=['POST'])
+def post_check():
+    return Response(json.dumps({'Output': 'This is a Check for Post Method'}), mimetype='application/json', status=200)
+
 if __name__ == '__main__':
     flaskrun(application)
