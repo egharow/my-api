@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ftracker"
+version = "0.1.0"
+description = "Local household finance tracker: statements in, committed monthly numbers out"
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl>=3.1",
+    "xlrd>=2.0.1",
+    "pdfplumber>=0.11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+finance = "ftracker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ftracker*"]
+
+[tool.setuptools.package-data]
+ftracker = ["schema.sql"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,11 @@
+# personal data must never be committed
+*.db
+*.db-journal
+*.sqlite
+inbox/
+archive/
+data/
+backups/
+.venv/
+__pycache__/
+*.egg-info/
