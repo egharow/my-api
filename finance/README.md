@@ -5,7 +5,7 @@ computer; the database, statements and backups never leave it and are never comm
 
 ## Status
 
-Built and tested (42 automated tests, run on Linux with invented data; not yet run on Windows):
+Built and tested (76 automated tests, run on Linux with invented data; not yet run on Windows):
 
 - Parsers for the Isracard `.xlsx`, Amex `.xls` (several cards per file) and Leumi account `.pdf`.
 - Import into a draft, de-duplicating by voucher number / balance so overlapping files are safe.
@@ -14,12 +14,16 @@ Built and tested (42 automated tests, run on Linux with invented data; not yet r
 - Reconciliation of card payments against card statements, and a running-balance check.
 - Bank-fee refund tracking: flagged when a fee is not refunded within 14 days.
 - "Expected files" checklist, comments on every discrepancy, Submit with a timestamp, reopen with a reason.
-- ₪/$ rates by date, balances you enter, net worth in either currency.
-- One-time import of the old budget sheet (`finance sheet-import`): 18 monthly logs, income/savings/debt/budget
-  figures, net worth snapshots and loans. Your old categories are kept and become rules for new statements.
+- ₪/$ rates by date, balances you enter (due every two months), net worth in either currency.
+- One-time import of the old budget sheet; your old categories become rules for new statements.
+- Goals by date or by age, with required monthly saving, recent growth and a projection.
+- Local dashboard (`finance serve`): net worth, income vs spending, categories, goals, review, comments,
+  imports/submit, balances. Works on a phone-width screen and in dark mode.
+- `finance export`: a workbook for the shared Google Sheet from submitted imports only.
 
-Not built yet: the browser dashboard, goals, Google Sheet sync.
-Live Bank of Israel rate download is written but untested; use `finance fx set` meanwhile.
+Not built: automatic push to Google Sheets (the export is uploaded by hand), the Max/בהצדעה and
+Shir's One Zero card parsers (they need sample statements), live Bank of Israel rates (written, untested;
+use `finance fx set`).
 
 ## Setup (Windows)
 
@@ -42,7 +46,25 @@ Live Bank of Israel rate download is written but untested; use `finance fx set` 
 
 1. Drop the new files into `inbox\`.
 2. Double-click `import.bat`. Only new files are read; history is not reloaded.
-3. Review, then submit (below). `status.bat` shows the checklist at any time.
+3. Double-click `dashboard.bat` to review categories, comment on items, enter balances and submit.
+   (`status.bat` shows the checklist in a plain window.)
+
+## First-run rules for your income
+
+```
+finance rule add "פאפאיה" Salary --kind income --direction in
+finance rule add "מטריקס" "Former employer" --kind income --direction in
+finance rule add "מופ\"ת מילואי" "Reserve duty pay" --kind income --direction in
+finance account add --kind savings --issuer onezero --label "One Zero" --owner Ely
+finance account destination-rule "העברה דיגיטל" --bank "One Zero"
+```
+
+## Sharing
+
+- **Google Sheet:** `finance export` writes `exports\finance-summary-DATE.xlsx` (submitted imports only; add
+  `--notes` to include comments). Upload it to Drive and open it as a Google Sheet.
+- **Another device at home:** `finance serve --lan --pin 123456`, then open `http://<this computer>:8765/`
+  there. Plain HTTP on your home network only. Each person picks their name at the top; comments use it.
 
 ## Commands
 
@@ -63,6 +85,11 @@ finance account destination-rule "העברה דיגיטל" --bank "One Zero"
 finance submit N [--ack]               lock import N; open items are recorded if you acknowledge
 finance reopen N --reason "..."        amend a submitted import (kept as a new version)
 finance history
+finance serve [--lan --pin N]           the dashboard
+finance export [--notes]               workbook for the shared sheet
+finance goal add --name N --amount A (--by DATE | --age 40 --owner Ely) [--account LABEL] [--return-rate 0.05]
+finance goal list | progress --goal N [--extra 500]
+finance owner birth Ely 1990-06-15
 finance summary 2026-10 [--owner Shir]
 ```
 

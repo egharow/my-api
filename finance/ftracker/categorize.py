@@ -131,7 +131,8 @@ def approve(conn: sqlite3.Connection, txn_ids: list[int], category_name: str,
     if learn and txn_ids:
         desc = conn.execute("SELECT description_norm FROM transactions WHERE id = ?",
                             (txn_ids[0],)).fetchone()[0]
-        add_learned_rule(conn, desc, category_name)
+        key = merchant_key(desc)
+        add_learned_rule(conn, key if len(key) >= 4 else desc, category_name)
     conn.commit()
     return len(txn_ids)
 

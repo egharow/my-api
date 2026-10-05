@@ -191,3 +191,17 @@ def test_expected_files_missing_card_month_and_stale_bank(home, conn, monkeypatc
     assert ("Isracard 1111", "2026-10", "missing") in later      # more than 3 days on, it is missing
     assert any(i["source"] == "Leumi 9999" and i["status"] == "due" for i in items)
     assert any(i["source"] == "Balances" for i in items)
+
+
+def test_history_imports_do_not_flood_needs_attention_and_items_belong_to_their_own_import(home, conn, monkeypatch, tmp_path):
+    from ftracker import sheet_import
+    from .test_sheet_import import _workbook
+    accounts.add_owner(conn, "Ely"); accounts.add_owner(conn, "Shir")
+    sheet_import.save(conn, sheet_import.parse_workbook(_workbook(tmp_path / "h.xlsx")))
+    assert not _items(conn, "large_item")                              # old lines are reviewed, not flagged
+    big = card_file(txns=[card_txn(date(2026, 9, 9), "ONE OFF SERVICE", 3500.0, "x1")])
+    run_import(home, conn, monkeypatch, [("c.xlsx", big)])
+    statement_batch = conn.execute("SELECT batch_id FROM source_files").fetchone()[0]
+    history_batch = conn.execute("SELECT id FROM batches WHERE id != ?", (statement_batch,)).fetchone()[0]
+    assert any("Large payment" in i for i in commits.readiness(conn, statement_batch, "2026-10-05"))
+    assert not any("Large payment" in i for i in commits.readiness(conn, history_batch, "2026-10-05"))

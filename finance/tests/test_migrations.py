@@ -33,3 +33,14 @@ def test_a_new_database_is_not_backed_up_and_reopening_is_a_no_op(tmp_path):
     assert not list(tmp_path.glob("*.before-upgrade*"))
     connect(db).close()
     assert not list(tmp_path.glob("*.before-upgrade*"))
+
+
+def test_a_database_from_the_middle_commit_that_already_has_monthly_entries_still_upgrades(tmp_path):
+    db = tmp_path / "finance.db"
+    _make_v1(db)
+    c = sqlite3.connect(db)
+    c.executescript(resources.files("ftracker").joinpath("migrations", "002_monthly_entries.sql").read_text(encoding="utf-8"))
+    c.close()                                                  # version still 1, table already there
+    conn = connect(db)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    conn.close()

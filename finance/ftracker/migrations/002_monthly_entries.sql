@@ -1,6 +1,6 @@
 -- Monthly figures that are not line items in any statement: income, savings, debt payments
 -- and budget targets, imported from the old budget sheet.
-CREATE TABLE monthly_entries (
+CREATE TABLE IF NOT EXISTS monthly_entries (
     id        INTEGER PRIMARY KEY,
     month     TEXT NOT NULL,
     section   TEXT NOT NULL CHECK (section IN ('income','saving','debt','budget')),

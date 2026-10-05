@@ -33,7 +33,7 @@ def set_birth_date(conn: sqlite3.Connection, owner: str, birth: str) -> None:
 
 def add_goal(conn: sqlite3.Connection, name: str, target_amount: float, currency: str = "ILS",
              target_date: str | None = None, target_age: int | None = None, owner: str | None = None,
-             accounts_: list[str] | None = None, annual_return: float = 0.0, note: str | None = None) -> int:
+             accounts_: list[str | int] | None = None, annual_return: float = 0.0, note: str | None = None) -> int:
     if target_amount <= 0:
         raise ValueError("the target amount must be above zero")
     if target_date and target_age:
@@ -51,7 +51,7 @@ def add_goal(conn: sqlite3.Connection, name: str, target_amount: float, currency
         (name, target_amount, currency.upper(), target_date, target_age, owner_id(conn, owner), annual_return, note, now()))
     for ref in accounts_ or []:
         conn.execute("INSERT OR IGNORE INTO goal_accounts (goal_id, account_id) VALUES (?, ?)",
-                     (cur.lastrowid, find_account(conn, ref)["id"]))
+                     (cur.lastrowid, ref if isinstance(ref, int) else find_account(conn, ref)["id"]))
     audit(conn, "goal_added", "goal", cur.lastrowid, name)
     conn.commit()
     return cur.lastrowid

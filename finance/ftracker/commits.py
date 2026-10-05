@@ -16,16 +16,20 @@ class NeedsAcknowledgement(Exception):
 
 
 def readiness(conn: sqlite3.Connection, batch_id: int, today: str) -> list[str]:
+    """What is still open for this import. Items belong to the import that raised them."""
     issues = []
     n = conn.execute("SELECT COUNT(*) FROM transactions WHERE batch_id = ? AND category_status = 'proposed'",
                      (batch_id,)).fetchone()[0]
     if n:
         issues.append(f"{n} transaction(s) still have only a proposed category")
-    for d in conn.execute("SELECT type, title FROM discrepancies WHERE status = 'open' AND type != 'manual'"):
+    for d in conn.execute("SELECT title FROM discrepancies WHERE status = 'open' AND type != 'manual' "
+                          "AND (batch_id = ? OR batch_id IS NULL)", (batch_id,)):
         issues.append(f"open: {d['title']}")
-    for e in expected.expected_files(conn, today):
-        if e["status"] in ("missing", "due"):
-            issues.append(f"{e['status']}: {e['source']} {e['period']} ({e['detail']})".replace("  ", " "))
+    has_files = conn.execute("SELECT 1 FROM source_files WHERE batch_id = ?", (batch_id,)).fetchone()
+    if has_files:    # the checklist of expected files only matters when statements are being submitted
+        for e in expected.expected_files(conn, today):
+            if e["status"] in ("missing", "due"):
+                issues.append(f"{e['status']}: {e['source']} {e['period']} ({e['detail']})".replace("  ", " "))
     return issues
 
 

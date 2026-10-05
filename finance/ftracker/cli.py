@@ -210,6 +210,12 @@ def cmd_export(args):
     print("Upload it to Google Drive and open it as a Google Sheet, or File > Import into the shared sheet.")
 
 
+def cmd_serve(args):
+    from . import web
+    home = resolve_home(args.home)
+    web.serve(home, args.port, args.lan, args.pin, not args.no_browser)
+
+
 def cmd_items(args):
     home, conn = _open(args)
     statuses = ("open", "explained", "resolved", "acknowledged") if args.all else ("open", "explained")
@@ -348,6 +354,9 @@ def build_parser():
     s.set_defaults(fn=cmd_goal)
     s = sub.add_parser("export"); s.add_argument("--out"); s.add_argument("--notes", action="store_true")
     s.set_defaults(fn=cmd_export)
+    s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=8765)
+    s.add_argument("--lan", action="store_true", help="let other devices on your home network open it (PIN required)")
+    s.add_argument("--pin"); s.add_argument("--no-browser", action="store_true"); s.set_defaults(fn=cmd_serve)
     s = sub.add_parser("items"); s.add_argument("--all", action="store_true")
     s.add_argument("--threads", action="store_true"); s.set_defaults(fn=cmd_items)
     s = sub.add_parser("comment"); s.add_argument("item", type=int); s.add_argument("text")

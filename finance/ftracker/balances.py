@@ -13,7 +13,12 @@ ASSET_KINDS = ("bank", "investment", "pension", "savings", "real_estate", "loan"
 
 def set_balance(conn: sqlite3.Connection, ref: str, amount: float, as_of: str | None = None,
                 currency: str | None = None, batch_id: int | None = None, note: str | None = None) -> None:
-    acct = find_account(conn, ref)
+    set_balance_for(conn, find_account(conn, ref)["id"], amount, as_of, currency, batch_id, note)
+
+
+def set_balance_for(conn: sqlite3.Connection, account_id: int, amount: float, as_of: str | None = None,
+                    currency: str | None = None, batch_id: int | None = None, note: str | None = None) -> None:
+    acct = conn.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
     as_of = as_of or date.today().isoformat()
     if acct["kind"] == "loan" and amount > 0:
         amount = -amount           # debts are stored as negative balances

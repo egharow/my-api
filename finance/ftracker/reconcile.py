@@ -152,7 +152,10 @@ def fee_status(conn: sqlite3.Connection, today: str, batch_id: int | None = None
 
 
 def flag_large_and_transfers(conn: sqlite3.Connection, batch_id: int) -> None:
-    for t in conn.execute("SELECT * FROM transactions WHERE kind IN ('purchase','other') AND ABS(amount) >= ?", (LARGE_ITEM,)):
+    # Only statement imports raise flags. History imported from the old sheet is reviewed on the Review page.
+    statement_batches = "(SELECT batch_id FROM source_files)"
+    for t in conn.execute(f"SELECT * FROM transactions WHERE kind IN ('purchase','other') AND ABS(amount) >= ? "
+                          f"AND batch_id IN {statement_batches}", (LARGE_ITEM,)):
         fp = f"large:{t['id']}"
         if t["category_status"] == "proposed":
             dx.raise_item(conn, fp, "large_item",
@@ -162,7 +165,8 @@ def flag_large_and_transfers(conn: sqlite3.Connection, batch_id: int) -> None:
             dx.auto_resolve(conn, fp, "category confirmed")
     for t in conn.execute(
             """SELECT t.* FROM transactions t JOIN categories c ON c.id = t.category_id
-               WHERE t.kind = 'transfer' AND c.name IN ('Internal transfer','Transfer to savings')"""):
+               WHERE t.kind = 'transfer' AND c.name IN ('Internal transfer','Transfer to savings')
+                 AND t.batch_id IN (SELECT batch_id FROM source_files)"""):
         fp = f"xfer:{t['id']}"
         if t["counterparty_account_id"] is None:
             dx.raise_item(conn, fp, "transfer_destination",
