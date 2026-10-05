@@ -105,3 +105,22 @@ def set_destination_rule(conn: sqlite3.Connection, pattern: str, account_ref: st
     audit(conn, "destination_rule", "account", acct["id"], pat)
     conn.commit()
     return {"updated": cur.rowcount, "left_in_submitted_imports": skipped}
+
+
+def set_owner_by_id(conn: sqlite3.Connection, account_id: int, owner: str | None) -> None:
+    conn.execute("UPDATE accounts SET owner_id = ? WHERE id = ?", (owner_id(conn, owner), account_id))
+    audit(conn, "set_owner", "account", account_id, owner or "none")
+    conn.commit()
+
+
+def add_alias(conn: sqlite3.Connection, owner: str, alias: str) -> None:
+    alias = alias.strip()
+    if not alias:
+        raise ValueError("type the name exactly as it is printed on the statement")
+    conn.execute("INSERT OR REPLACE INTO owner_aliases (owner_id, alias) VALUES (?, ?)", (owner_id(conn, owner), alias))
+    conn.commit()
+
+
+def remove_alias(conn: sqlite3.Connection, alias_id: int) -> None:
+    conn.execute("DELETE FROM owner_aliases WHERE id = ?", (alias_id,))
+    conn.commit()

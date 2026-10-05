@@ -5,7 +5,7 @@ computer; the database, statements and backups never leave it and are never comm
 
 ## Status
 
-Built and tested (102 automated tests, run on Linux with invented data; not yet run on Windows):
+Built and tested (124 automated tests, run on Linux with invented data; not yet run on Windows):
 
 - Parsers for the Isracard `.xlsx`, Amex `.xls` (several cards per file) and Leumi account `.pdf`.
 - Import into a draft, de-duplicating by voucher number / balance so overlapping files are safe.
@@ -30,39 +30,26 @@ Written and tested only against stand-ins, because the build sandbox blocks the 
 dollar-rate fetch and the Google Sheet link. If either misbehaves for you, the app says why and keeps working;
 type the rate (`finance fx set today USD ILS 3.6`) and tell me what the message said.
 
-## Setup (Windows)
+## Use it (Windows)
 
 1. Install Python 3.10+ from python.org (tick "Add python to PATH").
-2. Double-click `setup.bat`. It creates `%USERPROFILE%\Finance\` with `inbox`, `archive`, `data`, `backups`.
-   Keep that folder out of OneDrive/Drive sync: syncing a live database file can corrupt it.
-   Put copies of `archive` and `backups` there if you want cloud protection.
+2. Unzip the app anywhere (not in OneDrive) and double-click **`Finance.pyw`**. The first run sets itself up
+   with a progress window; after that it opens the app in its own Edge window and closes itself when you
+   close that window.
+3. Everything else happens inside the app: drag statements onto the drop box, review categories, comment on
+   items, enter balances, submit, link the Google Sheet, manage people and rules (Setup tab), import the old
+   budget sheet (Setup > Import the old budget sheet).
 
-## One-time: import the old sheet
+If a `starter_rules.json` and a `seed/` folder (history.xlsx, statements/) sit next to `Finance.pyw`, they are
+loaded once on first launch. They are private and never committed to git.
 
-1. In Google Sheets: File > Download > Microsoft Excel (.xlsx).
-2. Preview (writes nothing): `finance sheet-import "E&S Budget.xlsx"`
-3. Check the mapping and warnings, then save as a draft: `finance sheet-import "E&S Budget.xlsx" --save`
-   Use `--map "Vituri=Medical"` to map a sheet category you want merged into an existing one.
-4. Dollar accounts use today's rate. It is fetched automatically; if you are offline, type it on the
-   Balances page or run `finance fx set today USD ILS 3.6`.
-5. `finance review`, then `finance submit N`.
+Data lives in `C:\Users\<you>\Finance` (override with FINANCE_HOME): `data` (database), `archive` (originals,
+filed by card/account), `backups` (before every import), `app-log.txt`.
 
-## Each time
+## Setup without typing commands
 
-1. Drop the new files into `inbox\`.
-2. Double-click `import.bat`. Only new files are read; history is not reloaded.
-3. Double-click `dashboard.bat` to review categories, comment on items, enter balances and submit.
-   (`status.bat` shows the checklist in a plain window.)
-
-## First-run rules for your income
-
-```
-finance rule add "פאפאיה" Salary --kind income --direction in
-finance rule add "מטריקס" "Former employer" --kind income --direction in
-finance rule add "מופ\"ת מילואי" "Reserve duty pay" --kind income --direction in
-finance account add --kind savings --issuer onezero --label "One Zero" --owner Ely
-finance account destination-rule "העברה דיגיטל" --bank "One Zero"
-```
+The Setup tab manages people (and the names printed on their statements), who owns each account, and rules
+(spending, income, transfers to your household or to a savings account). `starter_rules.json` can pre-fill all of it.
 
 ## Sharing
 

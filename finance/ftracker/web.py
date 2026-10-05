@@ -1,15 +1,21 @@
 """The local dashboard. Serves on this computer only unless you ask for --lan (then a PIN is required)."""
 import hashlib
 import hmac
+import json
+import re
 import secrets
+import sys
+import threading
+import time
 import webbrowser
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import date
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import balances, categorize, commits, fx, goals, importer, sheetsync, views
+from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, uploads, views, views_setup
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home
@@ -17,7 +23,9 @@ from .db import connect
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 CSP = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; "
-       "form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+       "form-action 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
+UPLOAD_PATHS = {"/upload", "/history/upload"}
+TOKEN_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
 @dataclass
@@ -32,10 +40,17 @@ def _html(status: int, text: str, extra=None) -> Response:
 
 
 class App:
-    def __init__(self, home: Home, pin: str | None = None, lan: bool = False, today: str | None = None):
+    def __init__(self, home: Home, pin: str | None = None, lan: bool = False, today: str | None = None,
+                 app_dir: Path | None = None, watchdog: "appmode.Watchdog | None" = None, clock=time.time):
         self.home, self.pin, self.lan, self.fixed_today = home, pin, lan, today
         self.csrf = secrets.token_urlsafe(24)
         self._secret = secrets.token_bytes(32)
+        self.app_dir = app_dir or appmode.app_dir()
+        self.watchdog, self.clock, self.active = watchdog, clock, 0
+        self.shutdown = None                      # set by serve(); closes the server
+
+    def _json(self, status: int, obj: dict) -> Response:
+        return Response(status, json.dumps(obj).encode("utf-8"), [("Content-Type", "application/json")])
 
     def _today(self) -> str:
         return self.fixed_today or date.today().isoformat()
@@ -61,6 +76,14 @@ class App:
             if not (cookies.get("auth") and hmac.compare_digest(cookies["auth"].value, self._auth_token())):
                 return _html(401, self._login_page())
 
+        if path == "/ping":
+            if self.watchdog:
+                self.watchdog.ping(self.clock())
+            return self._json(200, {"app": appmode.APP_ID, "ok": True})
+        if method == "POST" and path in UPLOAD_PATHS:
+            return self._upload(path, headers, body)
+
+        self.active += 1
         conn = connect(self.home.db_path)
         try:
             owners = [r[0] for r in conn.execute("SELECT name FROM owners ORDER BY name")]
@@ -68,7 +91,8 @@ class App:
             flash = unquote(cookies["flash"].value) if cookies.get("flash") else ""
             ctx = views.Ctx(today=self._today(), who=who, csrf=self.csrf, owners=owners,
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
-                            inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0)
+                            inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
+                            data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS)
             if method == "POST":
                 return self._post(conn, ctx, path, headers, body)
             if path in ("/", "/balances") and not self.fixed_today:
@@ -82,6 +106,7 @@ class App:
             return res
         finally:
             conn.close()
+            self.active -= 1
 
     def _login_page(self, msg: str = "") -> str:
         return (f"<!doctype html><meta charset=utf-8><title>Finance</title><body style='font:16px system-ui;max-width:320px;margin:60px auto'>"
@@ -105,7 +130,58 @@ class App:
             return _html(200, views.goals_page(conn, ctx))
         if path == "/sheet":
             return _html(200, views.sheet_page(conn, ctx))
+        if path == "/setup":
+            return _html(200, views_setup.setup_page(conn, ctx))
+        if path == "/history":
+            return self._history_page(conn, ctx, q.get("t", ""))
         return _html(404, "<h1>Not found</h1>")
+
+    def _check_post(self, headers: dict, token: str) -> Response | None:
+        origin = headers.get("origin")
+        if origin and urlparse(origin).netloc != headers.get("host"):
+            return self._json(403, {"error": "Blocked: request came from another site."})
+        if not hmac.compare_digest(token, self.csrf):
+            return self._json(403, {"error": "Reload the page and try again."})
+        return None
+
+    def _upload(self, path: str, headers: dict, body: bytes) -> Response:
+        bad = self._check_post(headers, headers.get("x-csrf", ""))
+        if bad:
+            return bad
+        try:
+            files = uploads.parse_multipart(headers.get("content-type", ""), body)
+        except uploads.UploadError as exc:
+            return self._json(400, {"error": str(exc)})
+        if not files:
+            return self._json(400, {"error": "No file arrived."})
+        if path == "/upload":
+            saved, rejected = uploads.save_to_inbox(files, self.home.inbox)
+            return self._json(200, {"saved": saved, "rejected": rejected})
+        f = files[0]
+        if not f.name.lower().endswith(".xlsx"):
+            return self._json(400, {"error": "Please choose the Excel (.xlsx) file you downloaded from Google Sheets."})
+        tmp = self.home.data / "tmp"
+        tmp.mkdir(parents=True, exist_ok=True)
+        for old in tmp.glob("history-*.xlsx"):
+            if time.time() - old.stat().st_mtime > 86400:
+                old.unlink(missing_ok=True)
+        token = secrets.token_hex(8)
+        dest = tmp / f"history-{token}.xlsx"
+        dest.write_bytes(f.data)
+        try:
+            sheet_import.parse_workbook(dest)
+        except Exception as exc:
+            dest.unlink(missing_ok=True)
+            return self._json(400, {"error": f"That file could not be read as your budget sheet ({exc})."})
+        return self._json(200, {"token": token})
+
+    def _history_page(self, conn, ctx, token: str) -> Response:
+        if not token:
+            return _html(200, views_setup.history_upload_page(conn, ctx))
+        path = self.home.data / "tmp" / f"history-{token}.xlsx"
+        if not TOKEN_RE.match(token) or not path.exists():
+            return self._redirect("/history", "That preview has expired. Choose the file again.", err=True)
+        return _html(200, views_setup.history_preview_page(conn, ctx, sheet_import.parse_workbook(path), token))
 
     def _redirect(self, to: str, msg: str = "", err: bool = False, cookies=None) -> Response:
         h = [("Location", to)]
@@ -122,7 +198,7 @@ class App:
             return _html(403, "<h1>Blocked: request came from another site</h1>")
         if not hmac.compare_digest(form.get("csrf", ""), self.csrf):
             return _html(403, "<h1>Blocked: reload the page and try again</h1>")
-        back = urlparse(headers.get("referer", "/")).path or "/"
+        back = urlparse(headers.get("referer", "")).path or ("/setup" if path.startswith("/setup") else "/history" if path.startswith("/history") else "/")
         who = ctx.who or "user"
         try:
             if path == "/who":
@@ -180,6 +256,62 @@ class App:
             if path == "/sheet/unlink":
                 sheetsync.unlink(conn)
                 return self._redirect("/sheet", "Unlinked")
+            if path == "/seed/dismiss":
+                firstrun.dismiss_notice(conn)
+                return self._redirect("/", "")
+            if path == "/quit":
+                if self.shutdown:
+                    threading.Timer(0.5, self.shutdown).start()
+                return _html(200, "<!doctype html><meta charset=utf-8><title>Closed</title><body style='font:16px system-ui;max-width:420px;margin:80px auto'>"
+                                  "<h2>Finance Tracker has closed.</h2><p>You can close this window. Open the app again whenever you like.</p>")
+            if path == "/history/save":
+                token = form.get("t", "")
+                src = self.home.data / "tmp" / f"history-{token}.xlsx"
+                if not TOKEN_RE.match(token) or not src.exists():
+                    return self._redirect("/history", "That preview has expired. Choose the file again.", err=True)
+                extra = {form[f"src_{i}"]: form[f"dst_{i}"] for i in range(int(form.get("n_maps") or 0))
+                         if form.get(f"dst_{i}")}
+                res = sheet_import.save(conn, sheet_import.parse_workbook(src), form.get("primary") or "Ely", form.get("partner") or "Shir", extra)
+                src.unlink(missing_ok=True)
+                if res["batch_id"] is None:
+                    return self._redirect("/imports", "Nothing new: this history was already imported.")
+                return self._redirect("/imports", f"Old history saved as draft #{res['batch_id']}: {res['transactions']} lines, "
+                                                  f"{res['balances']} balances, {res['rules_learned']} rules learned. Review it, then submit.")
+            if path == "/setup/starter":
+                found = starter.find(self.app_dir)
+                if not found:
+                    return self._redirect("/setup", "No starter setup file was found.", err=True)
+                done = starter.apply(conn, found)
+                return self._redirect("/setup", f"Starter setup applied: {done['owners']} people, {done['accounts']} accounts, {done['rules']} rules.")
+            if path == "/setup/owner":
+                accounts_mod.add_owner(conn, form["name"].strip())
+                return self._redirect("/setup", f"{form['name'].strip()} added")
+            if path == "/setup/alias":
+                accounts_mod.add_alias(conn, form["owner"], form.get("alias", ""))
+                return self._redirect("/setup", "Name saved")
+            if path == "/setup/alias/remove":
+                accounts_mod.remove_alias(conn, int(form["id"]))
+                return self._redirect("/setup", "Name removed")
+            if path == "/setup/account-owner":
+                accounts_mod.set_owner_by_id(conn, int(form["id"]), form.get("owner") or None)
+                return self._redirect("/setup", "Saved")
+            if path == "/setup/rule":
+                dest = None
+                if form.get("destination"):
+                    dest = conn.execute("SELECT label FROM accounts WHERE id = ?", (int(form["destination"]),)).fetchone()[0]
+                categorize.add_rule_from_form(conn, form["pattern"], form.get("category", ""), form.get("mode", "spend"), dest)
+                return self._redirect("/setup", "Rule saved")
+            if path == "/setup/rule/toggle":
+                categorize.toggle_rule(conn, int(form["id"]))
+                return self._redirect("/setup", "Saved")
+            if path == "/setup/rule/delete":
+                categorize.delete_rule(conn, int(form["id"]))
+                return self._redirect("/setup", "Rule deleted")
+            if path == "/setup/shortcut":
+                exe = Path(sys.executable).with_name("pythonw.exe")
+                target = str(exe if exe.exists() else sys.executable)
+                lnk = appmode.create_desktop_shortcut(target, "-m ftracker app", str(self.app_dir))
+                return self._redirect("/setup", f"Icon added to your desktop ({Path(lnk).name})")
             if path == "/fx/set":
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
@@ -206,12 +338,33 @@ class App:
         return _html(404, "<h1>Not found</h1>")
 
 
-def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = None, open_browser: bool = True) -> None:
+def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = None, open_browser: bool = True,
+          app_mode: bool = False) -> None:
     home.ensure()
-    connect(home.db_path).close()
+    log = None
+    if app_mode:
+        # Started without a console (pythonw): print would crash, so send output to a log file you can send me.
+        log = open(home.root / "app-log.txt", "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stderr = log
+        port = appmode.PREFERRED_PORT
+        if not appmode._free(port):
+            if appmode.is_ours(port):                      # already running: just bring up a window
+                appmode.open_window(f"http://localhost:{port}/")
+                return
+            port = appmode.pick_port(port + 1)
+    conn = connect(home.db_path)
+    try:                                              # load what you already gave me, once, before the window opens
+        if firstrun.needed(conn, appmode.app_dir()):
+            firstrun.run(conn, home, appmode.app_dir())
+    except Exception:
+        import traceback
+        print(traceback.format_exc())
+    finally:
+        conn.close()
     if lan and not pin:
         pin = f"{secrets.randbelow(10 ** 6):06d}"
-    app = App(home, pin, lan)
+    watchdog = appmode.Watchdog(time.time()) if app_mode else None
+    app = App(home, pin, lan, watchdog=watchdog)
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, res: Response):
@@ -230,20 +383,37 @@ def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = Non
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
-            self._send(app.handle("POST", self.path, dict(self.headers), self.rfile.read(min(n, 1_000_000))))
+            limit = uploads.MAX_BYTES + 1_000_000 if self.path in UPLOAD_PATHS else 1_000_000
+            self._send(app.handle("POST", self.path, dict(self.headers), self.rfile.read(min(n, limit))))
 
         def log_message(self, *a):
             pass
 
     httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port), Handler)
+    app.shutdown = httpd.shutdown
     url = f"http://localhost:{port}/"
-    print(f"Dashboard running at {url}   (Ctrl+C to stop)")
+    if watchdog:
+        def watch():
+            while True:
+                time.sleep(5)
+                if watchdog.should_stop(time.time(), app.active):
+                    httpd.shutdown()
+                    return
+        threading.Thread(target=watch, daemon=True).start()
+    if app_mode or sys.stdout:
+        print(f"Dashboard running at {url}" + ("" if app_mode else "   (Ctrl+C to stop)"))
     if lan:
         print(f"Open on your home network at http://<this computer's address>:{port}/ with PIN {pin}\n"
               "This is plain HTTP on your own network; only use it at home.")
     if open_browser:
-        webbrowser.open(url)
+        if app_mode:
+            threading.Thread(target=appmode.open_window, args=(url,), daemon=True).start()
+        else:
+            webbrowser.open(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        if log:
+            log.flush()

@@ -18,6 +18,9 @@ class Ctx:
     flash_kind: str = "ok"
     owners: list[str] = field(default_factory=list)
     inbox_count: int = 0
+    data_root: str = ""
+    starter: bool = False
+    can_shortcut: bool = False
 
 
 CSS = """
@@ -61,6 +64,10 @@ button{cursor:pointer;background:var(--accent);color:#fff;border-color:var(--acc
 @media (max-width:600px){.hrow{grid-template-columns:90px 1fr 88px}.tile .v{font-size:22px}}
 """
 
+HEARTBEAT = """
+(function(){function p(){fetch('/ping',{cache:'no-store'}).catch(function(){})}p();setInterval(p,15000)})();
+"""
+
 JS = """
 (function(){var t=document.getElementById('tip');
 document.addEventListener('mouseover',function(e){var el=e.target.closest('[data-tip]');if(!el){t.style.display='none';return}
@@ -70,7 +77,7 @@ document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.related
 """
 
 NAV = [("/", "Dashboard"), ("/review", "Review"), ("/items", "Needs attention"), ("/imports", "Imports"),
-       ("/balances", "Balances"), ("/goals", "Goals"), ("/sheet", "Google Sheet")]
+       ("/balances", "Balances"), ("/goals", "Goals"), ("/sheet", "Google Sheet"), ("/setup", "Setup")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:
@@ -98,10 +105,13 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
         links.append(f'<a href="{href}" class="{"on" if path == href else ""}">{name}{badge}</a>')
     who = "".join(f'<option value="{esc(o)}"{" selected" if o == ctx.who else ""}>{esc(o)}</option>' for o in ctx.owners)
     flash = f'<div class="flash {"err" if ctx.flash_kind == "err" else ""}" role="status">{esc(ctx.flash)}</div>' if ctx.flash else ""
-    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-            f"<title>{esc(title)} · Finance</title><style>{CSS}</style></head><body><header><nav>{''.join(links)}<span class=\"sp\"></span>"
-            f'{_form(ctx, "/who", f"<label class=muted>You are <select name=who onchange=this.form.submit()>{who}</select></label>", "inline") if ctx.owners else ""}'
-            f'</nav></header><main>{flash}{body}</main><div id="tip"></div><script>{JS}</script></body></html>')
+    who_form = (_form(ctx, "/who", "<label class=muted>You are <select name=who onchange=this.form.submit()>" + who + "</select></label>", "inline")
+                if ctx.owners else "")
+    quit_form = _form(ctx, "/quit", "<button class=quiet title='Close the app'>Quit</button>", "inline")
+    return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+            f"<title>{esc(title)} · Finance</title><style>{CSS}</style></head><body><header><nav>" + "".join(links)
+            + "<span class=\"sp\"></span>" + who_form + quit_form
+            + f"</nav></header><main>{flash}{body}</main><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
 
 
 def _tile(label: str, value: str, detail: str = "") -> str:
@@ -137,8 +147,15 @@ def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     window = _month_window([o["month"] for o in with_data], 18)
     by_month = {o["month"]: o for o in with_data}
     chosen = q.get("month") or (with_data[-1]["month"] if with_data else None)
-    out = ['<h1>Dashboard</h1>']
+    from .views_setup import dropzone
+    out = ['<h1>Dashboard</h1>', dropzone(ctx, compact=True)]
 
+    from . import firstrun
+    loaded = firstrun.pending_notice(conn)
+    if loaded:
+        out.append('<div class="banner" style="border-color:var(--good)"><b>Your starting data is loaded.</b><ul>' + "".join(f"<li>{esc(x)}</li>" for x in loaded)
+                   + "</ul>Everything is a draft: check the <a href='/review'>Review</a> tab, then submit on the <a href='/imports'>Imports</a> tab. "
+                   + _form(ctx, "/seed/dismiss", "<button class=quiet>Got it</button>", "inline") + "</div>")
     drafts = conn.execute("SELECT COUNT(*) FROM batches WHERE status != 'committed'").fetchone()[0]
     if drafts:
         out.append(f'<div class="banner">{drafts} import(s) are drafts. Numbers below include them until you submit. <a href="/imports">Review and submit</a></div>')
@@ -322,9 +339,10 @@ def item(conn: sqlite3.Connection, ctx: Ctx, item_id: int) -> str:
 
 
 def imports(conn: sqlite3.Connection, ctx: Ctx) -> str:
-    out = ["<h1>Imports</h1>",
-           f'<div class="card"><h2>Inbox</h2><p>{ctx.inbox_count} file(s) waiting in <code>inbox/</code>.</p>'
-           + _form(ctx, "/import", "<button>Import now</button>") + "</div>"]
+    from .views_setup import dropzone
+    out = ["<h1>Imports</h1>", dropzone(ctx),
+           (f'<div class="card" style="margin-top:12px"><h2>Waiting</h2><p>{ctx.inbox_count} file(s) are waiting to be imported.</p>'
+            + _form(ctx, "/import", "<button>Import them now</button>") + "</div>") if ctx.inbox_count else ""]
     for b in conn.execute("SELECT * FROM batches ORDER BY id DESC LIMIT 15"):
         files = [r["original_name"] for r in conn.execute("SELECT original_name FROM source_files WHERE batch_id = ?", (b["id"],))]
         n = conn.execute("SELECT COUNT(*) FROM transactions WHERE batch_id = ?", (b["id"],)).fetchone()[0]

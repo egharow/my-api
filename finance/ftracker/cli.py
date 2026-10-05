@@ -222,6 +222,18 @@ def cmd_serve(args):
     web.serve(home, args.port, args.lan, args.pin, not args.no_browser)
 
 
+def cmd_first_run(args):
+    from . import appmode, firstrun
+    home, conn = _open(args)
+    out = firstrun.run(conn, home, appmode.app_dir())
+    print("\n".join(out["steps"]) or "Nothing to load.")
+
+
+def cmd_app(args):
+    from . import web
+    web.serve(resolve_home(args.home), app_mode=True)
+
+
 def cmd_items(args):
     home, conn = _open(args)
     statuses = ("open", "explained", "resolved", "acknowledged") if args.all else ("open", "explained")
@@ -412,6 +424,8 @@ def build_parser():
     s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=8765)
     s.add_argument("--lan", action="store_true", help="let other devices on your home network open it (PIN required)")
     s.add_argument("--pin"); s.add_argument("--no-browser", action="store_true"); s.set_defaults(fn=cmd_serve)
+    s = sub.add_parser("first-run", help="load the starter setup and seed data next to the app"); s.set_defaults(fn=cmd_first_run)
+    s = sub.add_parser("app", help="run as an app window (what the desktop icon does)"); s.set_defaults(fn=cmd_app)
     s = sub.add_parser("items"); s.add_argument("--all", action="store_true")
     s.add_argument("--threads", action="store_true"); s.set_defaults(fn=cmd_items)
     s = sub.add_parser("comment"); s.add_argument("item", type=int); s.add_argument("text")

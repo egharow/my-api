@@ -195,3 +195,37 @@ def add_user_rule(conn: sqlite3.Connection, pattern: str, category_name: str, se
     audit(conn, "rule_added", "rule", None, f"{pat} -> {category_name}")
     touched = apply_rules_to_proposed(conn)
     return {"pattern": pat, "unapproved_reviewed": touched}
+
+
+def add_rule_from_form(conn: sqlite3.Connection, pattern: str, category: str, mode: str,
+                       destination: str | None = None) -> None:
+    """Rules as the Setup page offers them: ordinary, money coming in, or a transfer somewhere."""
+    if not pattern.strip():
+        raise ValueError("type the words that appear on the statement line")
+    if mode == "income":
+        add_user_rule(conn, pattern, category, "income", "in")
+    elif mode == "transfer_household":
+        add_user_rule(conn, pattern, "Transfer to household", "transfer")
+    elif mode == "transfer_account":
+        from .accounts import set_destination_rule
+        if not destination:
+            raise ValueError("choose the account the money goes to")
+        set_destination_rule(conn, pattern, destination)
+    else:
+        add_user_rule(conn, pattern, category)
+    conn.commit()
+
+
+def toggle_rule(conn: sqlite3.Connection, rule_id: int) -> None:
+    conn.execute("UPDATE rules SET enabled = 1 - enabled WHERE id = ?", (rule_id,))
+    conn.commit()
+
+
+def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
+    row = conn.execute("SELECT source FROM rules WHERE id = ?", (rule_id,)).fetchone()
+    if not row:
+        return
+    if row["source"] == "builtin":
+        raise PermissionError("built-in rules can be switched off but not deleted")
+    conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
+    conn.commit()

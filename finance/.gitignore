@@ -13,3 +13,7 @@ __pycache__/
 # personal first-run helpers: shipped in the zip made for the owner, never committed
 first_run_rules.py
 first-run-rules.bat
+starter_rules.json
+seed/
+launcher-log.txt
+.setup.lock
