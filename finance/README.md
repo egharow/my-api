@@ -5,7 +5,7 @@ computer; the database, statements and backups never leave it and are never comm
 
 ## Status
 
-Built and tested (33 automated tests, run on Linux with invented data; not yet run on Windows):
+Built and tested (42 automated tests, run on Linux with invented data; not yet run on Windows):
 
 - Parsers for the Isracard `.xlsx`, Amex `.xls` (several cards per file) and Leumi account `.pdf`.
 - Import into a draft, de-duplicating by voucher number / balance so overlapping files are safe.
@@ -15,8 +15,10 @@ Built and tested (33 automated tests, run on Linux with invented data; not yet r
 - Bank-fee refund tracking: flagged when a fee is not refunded within 14 days.
 - "Expected files" checklist, comments on every discrepancy, Submit with a timestamp, reopen with a reason.
 - ₪/$ rates by date, balances you enter, net worth in either currency.
+- One-time import of the old budget sheet (`finance sheet-import`): 18 monthly logs, income/savings/debt/budget
+  figures, net worth snapshots and loans. Your old categories are kept and become rules for new statements.
 
-Not built yet: import of the Google Sheet history, the browser dashboard, goals, Google Sheet sync.
+Not built yet: the browser dashboard, goals, Google Sheet sync.
 Live Bank of Israel rate download is written but untested; use `finance fx set` meanwhile.
 
 ## Setup (Windows)
@@ -25,6 +27,16 @@ Live Bank of Israel rate download is written but untested; use `finance fx set` 
 2. Double-click `setup.bat`. It creates `%USERPROFILE%\Finance\` with `inbox`, `archive`, `data`, `backups`.
    Keep that folder out of OneDrive/Drive sync: syncing a live database file can corrupt it.
    Put copies of `archive` and `backups` there if you want cloud protection.
+
+## One-time: import the old sheet
+
+1. In Google Sheets: File > Download > Microsoft Excel (.xlsx).
+2. Preview (writes nothing): `finance sheet-import "E&S Budget.xlsx"`
+3. Check the mapping and warnings, then save as a draft: `finance sheet-import "E&S Budget.xlsx" --save`
+   Use `--map "Vituri=Medical"` to map a sheet category you want merged into an existing one.
+4. Dollar balances need a rate for each snapshot date: `finance fx needed` lists them; enter each with
+   `finance fx set 2024-05-10 USD ILS 3.65` (or try `finance fx fetch --start 2024-05-01 --end 2026-04-30`).
+5. `finance review`, then `finance submit N`.
 
 ## Each time
 
@@ -45,6 +57,8 @@ finance comment ID "text" [--status explained --follow-up 2026-12-01] --author E
 finance note TXN_ID "text"             start a thread on any transaction
 finance balance set "Pension" 123456 --as-of 2026-10-01 [--currency USD]
 finance networth [--currency USD]
+finance fx needed | set DATE USD ILS RATE | fetch --start D --end D
+finance sheet-import FILE.xlsx [--save] [--map SHEET=APP] [--link SHEET_ACCOUNT=ACCOUNT]
 finance account destination-rule "העברה דיגיטל" --bank "One Zero"
 finance submit N [--ack]               lock import N; open items are recorded if you acknowledge
 finance reopen N --reason "..."        amend a submitted import (kept as a new version)

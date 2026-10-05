@@ -2,7 +2,7 @@ import argparse
 import sys
 from datetime import date
 
-from . import accounts, balances, categorize, commits, expected, fx, importer, reconcile, summary
+from . import accounts, balances, categorize, commits, expected, fx, importer, reconcile, sheet_import, summary
 from . import discrepancies as dx
 from .config import resolve_home
 from .db import connect
@@ -154,6 +154,26 @@ def cmd_rule(args):
             print(f"#{r['id']:<4} {r['source']:<8} {r['pattern']:<30} -> {r['category']}{'' if r['enabled'] else '  (off)'}")
 
 
+def cmd_sheet_import(args):
+    home, conn = _open(args)
+    extra = dict(m.split("=", 1) for m in args.map or [])
+    links = dict(m.split("=", 1) for m in args.link or [])
+    data = sheet_import.parse_workbook(args.file, args.high_level_year)
+    print(sheet_import.preview(data, extra))
+    if not args.save:
+        print("\nPreview only. Nothing was saved. Run again with --save to write it as a draft import.")
+        return
+    res = sheet_import.save(conn, data, args.primary_owner, args.partner_owner, extra, links)
+    if res["batch_id"] is None:
+        print("\nNothing new to import; everything in this file is already saved.")
+        return
+    print(f"\nSaved as draft import #{res['batch_id']}: {res['transactions']} lines "
+          f"({res['already_there']} already there), {res['accounts_created']} accounts, "
+          f"{res['balances']} balances, {res['rules_learned']} rules learned from your categories, "
+          f"{res['transfers_reclassified']} Bit/transfer lines treated as transfers.")
+    print(f"Review it with `finance review`, then `finance submit {res['batch_id']}`.")
+
+
 def cmd_items(args):
     home, conn = _open(args)
     statuses = ("open", "explained", "resolved", "acknowledged") if args.all else ("open", "explained")
@@ -207,6 +227,13 @@ def cmd_fx(args):
     elif args.action == "fetch":
         n = fx.fetch_boi(conn, date.fromisoformat(args.start), date.fromisoformat(args.end))
         print(f"{n} rate(s) downloaded")
+    elif args.action == "needed":
+        rows = conn.execute("""SELECT DISTINCT b.as_of FROM balances b WHERE b.currency != 'ILS' ORDER BY b.as_of""").fetchall()
+        need = [r[0] for r in rows if fx.rate_on(conn, r[0], "USD", "ILS") is None]
+        if not need:
+            print("Every dollar balance already has a rate on or before its date.")
+        for d in need:
+            print(f"finance fx set {d} USD ILS RATE")
     else:
         for r in conn.execute("SELECT * FROM fx_rates ORDER BY rate_date DESC LIMIT 20"):
             print(f"{r['rate_date']} {r['base']}/{r['quote']} {r['rate']} ({r['source']})")
@@ -272,6 +299,11 @@ def build_parser():
     s.add_argument("pattern", nargs="?"); s.add_argument("category", nargs="?")
     s.add_argument("--kind"); s.add_argument("--direction", choices=["in", "out"])
     s.add_argument("--all", action="store_true"); s.set_defaults(fn=cmd_rule)
+    s = sub.add_parser("sheet-import"); s.add_argument("file")
+    s.add_argument("--save", action="store_true"); s.add_argument("--map", action="append", metavar="SHEET=APP")
+    s.add_argument("--link", action="append", metavar="SHEET_ACCOUNT=ACCOUNT")
+    s.add_argument("--primary-owner", default="Ely"); s.add_argument("--partner-owner", default="Shir")
+    s.add_argument("--high-level-year", type=int, default=2026); s.set_defaults(fn=cmd_sheet_import)
     s = sub.add_parser("items"); s.add_argument("--all", action="store_true")
     s.add_argument("--threads", action="store_true"); s.set_defaults(fn=cmd_items)
     s = sub.add_parser("comment"); s.add_argument("item", type=int); s.add_argument("text")
@@ -284,7 +316,7 @@ def build_parser():
     s.add_argument("--as-of"); s.add_argument("--currency"); s.add_argument("--note"); s.set_defaults(fn=cmd_balance)
     s = sub.add_parser("networth"); s.add_argument("--as-of"); s.add_argument("--currency", default="ILS")
     s.add_argument("--owner"); s.set_defaults(fn=cmd_networth)
-    s = sub.add_parser("fx"); s.add_argument("action", choices=["set", "fetch", "list"])
+    s = sub.add_parser("fx"); s.add_argument("action", choices=["set", "fetch", "list", "needed"])
     s.add_argument("date", nargs="?"); s.add_argument("base", nargs="?"); s.add_argument("quote", nargs="?")
     s.add_argument("rate", nargs="?", type=float); s.add_argument("--start"); s.add_argument("--end")
     s.set_defaults(fn=cmd_fx)

@@ -1,4 +1,5 @@
 """The checklist of files you should have uploaded, worked out from what the app already knows."""
+import json
 import sqlite3
 from collections import Counter
 from datetime import date, timedelta
@@ -20,6 +21,8 @@ def _months_between(start: date, end: date):
 def expected_files(conn: sqlite3.Connection, today: str) -> list[dict]:
     now_d = date.fromisoformat(today)
     items: list[dict] = []
+    row = conn.execute("SELECT value FROM settings WHERE key = 'history_months'").fetchone()
+    history = set(json.loads(row[0])) if row else set()
 
     for card in conn.execute("SELECT * FROM accounts WHERE kind = 'card' AND active = 1"):
         stmts = [date.fromisoformat(r[0]) for r in conn.execute(
@@ -30,7 +33,7 @@ def expected_files(conn: sqlite3.Connection, today: str) -> list[dict]:
         covered = {r[0] for r in conn.execute("SELECT month FROM coverage WHERE account_id = ?", (card["id"],))}
         have = {(d.year, d.month) for d in stmts}
         for y, m in _months_between(min(stmts), now_d):
-            if (y, m) in have or f"{y:04d}-{m:02d}" in covered:
+            if (y, m) in have or f"{y:04d}-{m:02d}" in covered or f"{y:04d}-{m:02d}" in history:
                 continue
             due = date(y, m, min(day, 28))
             if due >= now_d:

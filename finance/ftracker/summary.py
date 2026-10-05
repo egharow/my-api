@@ -30,8 +30,27 @@ def spending_by_category(conn: sqlite3.Connection, month: str | None = None, own
 
 
 def month_overview(conn: sqlite3.Connection, month: str):
-    inc = conn.execute(
-        """SELECT ROUND(COALESCE(SUM(t.amount),0),2) FROM transactions t JOIN categories c ON c.id = t.category_id
-           WHERE t.budget_month = ? AND c.kind = 'income' AND t.amount > 0""", (month,)).fetchone()[0]
+    """Income, spending and savings for a month.
+
+    Months with bank data use it. Older months that only exist in the imported budget sheet use
+    the sheet's income and debt figures, because those are not in any card statement.
+    """
+    has_bank = conn.execute(
+        """SELECT 1 FROM transactions t JOIN accounts a ON a.id = t.account_id
+           WHERE t.budget_month = ? AND a.kind = 'bank' LIMIT 1""", (month,)).fetchone() is not None
     spent = sum(r["spent"] for r in spending_by_category(conn, month))
-    return {"month": month, "income": inc, "spending": round(spent, 2), "saved": round(inc - spent, 2)}
+    if has_bank:
+        inc = conn.execute(
+            """SELECT ROUND(COALESCE(SUM(t.amount),0),2) FROM transactions t JOIN categories c ON c.id = t.category_id
+               WHERE t.budget_month = ? AND c.kind = 'income' AND t.amount > 0""", (month,)).fetchone()[0]
+        source = "bank"
+    else:
+        inc = conn.execute("SELECT ROUND(COALESCE(SUM(actual),0),2) FROM monthly_entries WHERE month = ? AND section = 'income'",
+                           (month,)).fetchone()[0]
+        spent += conn.execute("SELECT COALESCE(SUM(actual),0) FROM monthly_entries WHERE month = ? AND section = 'debt'",
+                              (month,)).fetchone()[0]
+        source = "sheet" if inc else "none"
+    saved_to = conn.execute("SELECT ROUND(COALESCE(SUM(actual),0),2) FROM monthly_entries WHERE month = ? AND section = 'saving'",
+                            (month,)).fetchone()[0]
+    return {"month": month, "income": inc, "spending": round(spent, 2), "saved": round(inc - spent, 2),
+            "put_into_savings": saved_to, "income_source": source}
