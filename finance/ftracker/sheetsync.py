@@ -65,7 +65,7 @@ def set_notes(conn: sqlite3.Connection, on: bool) -> None:
 
 def status(conn: sqlite3.Connection) -> dict:
     url = _get_setting(conn, "sheet_url")
-    return {"linked": bool(url), "last_sync": _get_setting(conn, "sheet_last_sync"),
+    return {"doc_url": _get_setting(conn, "sheet_doc_url"), "linked": bool(url), "last_sync": _get_setting(conn, "sheet_last_sync"),
             "last_result": _get_setting(conn, "sheet_last_result"), "notes": _get_setting(conn, "sheet_notes", "0") == "1",
             "has_token": bool(_get_setting(conn, "sheet_token"))}
 

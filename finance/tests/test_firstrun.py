@@ -83,3 +83,16 @@ def test_the_dashboard_says_what_was_loaded_until_you_dismiss_it(conn, home, app
     res = app.handle("POST", "/seed/dismiss", H, urlencode({"csrf": app.csrf}).encode())
     assert res.status == 303
     assert "Your starting data is loaded" not in app.handle("GET", "/", H).body.decode()
+
+
+def test_the_starter_file_can_carry_the_shared_sheet_and_its_secret(conn, home, tmp_path):
+    from ftracker import sheetsync
+    d = tmp_path / "ad"; d.mkdir()
+    (d / starter.FILENAME).write_text(json.dumps({"owners": [{"name": "Ely"}], "sheet": {
+        "doc_url": "https://docs.google.com/spreadsheets/d/abc/edit", "token": "t" * 32}}), encoding="utf-8")
+    starter.apply(conn, d / starter.FILENAME)
+    assert sheetsync.token(conn) == "t" * 32 and sheetsync.status(conn)["doc_url"].endswith("/abc/edit")
+    assert "t" * 32 in sheetsync.script_text(conn)
+    starter.apply(conn, d / starter.FILENAME)                                                  # twice changes nothing
+    page = App(home, today="2026-10-05", app_dir=d).handle("GET", "/sheet", H).body.decode()
+    assert "your shared sheet" in page and "docs.google.com/spreadsheets/d/abc" in page and "Copy the script" in page

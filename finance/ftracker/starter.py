@@ -3,7 +3,8 @@
 Kept as a file, not code, so personal details (employer names, account names) never live in the program itself.
 Schema: {"owners": [{"name", "aliases": []}], "accounts": [{"label", "kind", "owner", "issuer"}],
          "rules": [{"pattern", "category", "kind", "direction"}],
-         "destination_rules": [{"pattern", "account"}]}
+         "destination_rules": [{"pattern", "account"}],
+         "sheet": {"doc_url": "https://docs.google.com/spreadsheets/d/…/edit", "token": "…"}}
 Applying it twice changes nothing.
 """
 import json
@@ -39,5 +40,10 @@ def apply(conn: sqlite3.Connection, path: Path) -> dict:
     for d in data.get("destination_rules", []):
         accounts.set_destination_rule(conn, d["pattern"], d["account"])
         done["destinations"] += 1
+    sheet = data.get("sheet") or {}
+    if sheet.get("token") and not conn.execute("SELECT 1 FROM settings WHERE key = 'sheet_token'").fetchone():
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sheet_token', ?)", (sheet["token"],))
+    if sheet.get("doc_url"):
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sheet_doc_url', ?)", (sheet["doc_url"],))
     conn.commit()
     return done

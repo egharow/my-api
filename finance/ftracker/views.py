@@ -444,15 +444,19 @@ def sheet_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                '<div class="card"><h2>Not linked yet</h2><p>Do this once. After that the sheet updates itself after every submit, '
                "and only submitted numbers are sent.</p></div>"))
     script = esc(sheetsync.script_text(conn))
-    steps = ('<div class="card" style="margin-top:12px"><h2>Link it (about 5 minutes, once)</h2><ol>'
-             "<li>Open the Google Sheet you want to share (a new blank one is best).</li>"
-             "<li>Choose <b>Extensions › Apps Script</b>.</li>"
-             "<li>Delete what is there, paste the script below, and click <b>Save</b>.</li>"
+    doc = (f'<a href="{esc(st["doc_url"])}" target="_blank" rel="noopener"><b>your shared sheet</b></a>' if st["doc_url"]
+           else "the Google Sheet you want to share (a new blank one is best)")
+    copy_js = ("var t=document.getElementById('scr');t.select();"
+               "(navigator.clipboard?navigator.clipboard.writeText(t.value):Promise.reject()).then(function(){this.textContent='Copied ✔'}.bind(this))"
+               ".catch(function(){document.execCommand('copy')});")
+    steps = ('<div class="card" style="margin-top:12px"><h2>Link it (3 minutes, once)</h2>'
+             "<p class=muted>Google only lets a sheet's owner approve a script that writes to it, so this one step has to be yours.</p><ol>"
+             f"<li>Open {doc}, then choose <b>Extensions › Apps Script</b>.</li>"
+             f'<li><button onclick="{copy_js}">Copy the script</button> then delete what is in the editor, paste, and click <b>Save</b>.</li>'
              "<li><b>Deploy › New deployment</b>, type <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. "
-             "Click <b>Deploy</b> and allow it. Google warns that the app is unverified because you wrote it: choose Advanced, then continue.</li>"
+             "Click <b>Deploy</b> and allow it. Google warns the app is unverified because you wrote it: choose Advanced, then continue.</li>"
              "<li>Copy the <b>Web app</b> address and paste it here:</li></ol>"
              + _form(ctx, "/sheet/link", '<input name="url" style="width:100%;max-width:560px" placeholder="https://script.google.com/macros/s/…/exec" required> <button>Link and test</button>', "row")
-             + '<p class="muted">The script contains a secret that only this app knows, so keep it private. '
-               "Anyone with the address still cannot change your sheet without it.</p>"
-             f'<textarea readonly rows="10" style="width:100%;font:12px monospace" onclick="this.select()">{script}</textarea></div>')
+             + '<p class="muted">The script contains a secret that only this app knows. Anyone with the address still cannot change your sheet without it.</p>'
+             f'<textarea id="scr" readonly rows="8" style="width:100%;font:12px monospace" onclick="this.select()">{script}</textarea></div>')
     return layout(conn, ctx, "/sheet", "Google Sheet", head + steps)
