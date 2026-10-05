@@ -50,6 +50,11 @@ def _money(x: float) -> str:
 
 
 def match_card_payments(conn: sqlite3.Connection, batch_id: int) -> None:
+    # A line that is no longer a card payment (for example after a rule change) cannot be missing a statement.
+    for d in conn.execute("""SELECT d.fingerprint FROM discrepancies d JOIN transactions t ON t.id = d.subject_id
+                             WHERE d.type IN ('missing_statement','payment_mismatch') AND d.status = 'open'
+                               AND d.subject_type = 'transaction' AND t.kind != 'card_payment'""").fetchall():
+        dx.auto_resolve(conn, d["fingerprint"], "this payment no longer needs a statement")
     payments = conn.execute(
         """SELECT t.* FROM transactions t WHERE t.kind = 'card_payment' AND t.amount < 0
            AND NOT EXISTS (SELECT 1 FROM statements s WHERE s.matched_bank_txn_id = t.id)""").fetchall()

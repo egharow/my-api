@@ -38,6 +38,7 @@ CATEGORIES = [
     ("Former employer", None, "income", 0),
     ("Bank grants & interest", None, "income", 0),
     ("Other income", None, "income", 0),
+    ("Member card (בהצדעה)", None, "expense", 0),
     ("Card payment", None, "transfer", 1),
     ("Transfer to household", None, "transfer", 1),
     ("Transfer to savings", None, "saving", 1),
@@ -99,7 +100,8 @@ BUILTIN_RULES = [
     ("מאסטרקרד", "Card payment", "card_payment", "out", None, 1, None),
     ("אקספ", "Card payment", "card_payment", "out", None, 1, None),
     ("הבינלאומי", "Card payment", "card_payment", "out", None, 1, None),
-    ("מקס איט", "Card payment", "card_payment", "out", None, 1, "payment for a member card"),
+    # A member-card top-up with no statement to match: count the payment itself as spending.
+    ("מקס איט", "Member card (בהצדעה)", None, "out", None, 1, "member card; statement optional"),
     ("פרעון הלוואה", "Loans", "loan", "out", None, 1, None),
     ("משכנת", "Mortgage", "mortgage", "out", None, 1, None),
     ("עמל", "Bank fees", "fee", "out", 14, 1, "channel commission; expect a refund"),

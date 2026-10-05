@@ -83,7 +83,7 @@ def value_at(conn: sqlite3.Connection, goal, as_of: str) -> float:
     shares = {l["account_id"]: l["share"] for l in links}
     for r in balances.latest(conn, as_of):
         if r["account_id"] in shares:
-            total += shares[r["account_id"]] * fx.convert(conn, r["amount"], r["currency"], goal["currency"], as_of)
+            total += shares[r["account_id"]] * fx.convert_asset(conn, r["amount"], r["currency"], goal["currency"], as_of)
     return total
 
 

@@ -9,7 +9,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import balances, categorize, commits, goals, importer, views
+from . import balances, categorize, commits, fx, goals, importer, sheetsync, views
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home
@@ -71,6 +71,11 @@ class App:
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0)
             if method == "POST":
                 return self._post(conn, ctx, path, headers, body)
+            if path in ("/", "/balances") and not self.fixed_today:
+                try:
+                    fx.ensure_fresh(conn, self._today())      # at most every few hours; offline is fine
+                except Exception:
+                    pass
             res = self._get(conn, ctx, path, q)
             if flash:
                 res.headers.append(("Set-Cookie", "flash=; Max-Age=0; Path=/"))
@@ -98,6 +103,8 @@ class App:
             return _html(200, views.balances_page(conn, ctx))
         if path == "/goals":
             return _html(200, views.goals_page(conn, ctx))
+        if path == "/sheet":
+            return _html(200, views.sheet_page(conn, ctx))
         return _html(404, "<h1>Not found</h1>")
 
     def _redirect(self, to: str, msg: str = "", err: bool = False, cookies=None) -> Response:
@@ -146,7 +153,9 @@ class App:
                     commits.submit(conn, self.home, int(m[2]), who, form.get("ack") == "1", self._today())
                 except commits.NeedsAcknowledgement as exc:
                     return self._redirect("/imports", f"{len(exc.issues)} thing(s) are still open. Tick the box to submit anyway.", err=True)
-                return self._redirect("/imports", f"Import #{m[2]} submitted.")
+                sync = sheetsync.sync_if_linked(conn, self._today())
+                bad = bool(sync) and sync.startswith("Google Sheet NOT")
+                return self._redirect("/imports", f"Import #{m[2]} submitted." + (f" {sync}." if sync else ""), err=bad)
             if len(m) == 4 and m[1] == "imports" and m[3] == "reopen":
                 commits.reopen(conn, int(m[2]), form.get("reason", ""), who)
                 return self._redirect("/imports", f"Import #{m[2]} reopened.")
@@ -158,6 +167,28 @@ class App:
                         balances.set_balance_for(conn, int(key[4:]), amount, form.get("as_of") or self._today())
                         saved += 1
                 return self._redirect("/balances", f"{saved} balance(s) saved")
+            if path == "/sheet/link":
+                sheetsync.link(conn, form.get("url", ""))
+                res = sheetsync.push(conn, self._today())
+                return self._redirect("/sheet", ("Linked. " if res["ok"] else "Saved, but the first update failed: ") + res["detail"], err=not res["ok"])
+            if path == "/sheet/sync":
+                res = sheetsync.push(conn, self._today())
+                return self._redirect("/sheet", ("Updated: " if res["ok"] else "Not updated: ") + res["detail"], err=not res["ok"])
+            if path == "/sheet/notes":
+                sheetsync.set_notes(conn, form.get("notes") == "1")
+                return self._redirect("/sheet", "Saved")
+            if path == "/sheet/unlink":
+                sheetsync.unlink(conn)
+                return self._redirect("/sheet", "Unlinked")
+            if path == "/fx/set":
+                fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
+                conn.commit()
+                return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/fx/refresh":
+                res = fx.refresh_current(conn, self._today(), force=True)
+                if res["status"] == "failed":
+                    return self._redirect("/balances", "Could not reach a rate source (offline?). Type today's rate instead.", err=True)
+                return self._redirect("/balances", f"Dollar rate: ₪{res['rate']:.3f} ({res['source']}, {res['date']})")
             if path == "/accounts":
                 accounts_mod.add_account(conn, form["kind"], "manual", form["label"].strip(), form.get("owner") or None, form.get("currency", "ILS"))
                 return self._redirect("/balances", "Account added")

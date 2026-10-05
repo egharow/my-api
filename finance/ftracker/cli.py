@@ -2,7 +2,7 @@ import argparse
 import sys
 from datetime import date
 
-from . import accounts, balances, categorize, commits, expected, export, fx, goals, importer, reconcile, sheet_import, summary
+from . import accounts, balances, categorize, commits, expected, export, fx, goals, importer, reconcile, sheet_import, sheetsync, summary
 from . import discrepancies as dx
 from .config import resolve_home
 from .db import connect
@@ -15,7 +15,13 @@ def _money(x) -> str:
 def _open(args):
     home = resolve_home(args.home)
     home.ensure()
-    return home, connect(home.db_path)
+    conn = connect(home.db_path)
+    if args.cmd != "fx":                     # keep the dollar rate fresh; offline is fine
+        try:
+            fx.ensure_fresh(conn, args.today or date.today().isoformat())
+        except Exception:
+            pass
+    return home, conn
 
 
 def cmd_init(args):
@@ -258,27 +264,73 @@ def cmd_networth(args):
     for l in nw["lines"]:
         print(f"{l['account']:<28} {_money(l['native']):>14} {l['currency']}  = {_money(l['value']):>14} {nw['currency']}")
     print(f"{'TOTAL':<28} {'':>14}      = {_money(nw['total']):>14} {nw['currency']}  (as of {nw['as_of']})")
+    cur = fx.current_rate(conn)
+    if cur:
+        print(f"Dollar assets valued at {cur['rate']:.4f} ₪/$ ({cur['source']}, {cur['date']})")
 
 
 def cmd_fx(args):
     home, conn = _open(args)
+    today = args.today or date.today().isoformat()
     if args.action == "set":
-        fx.set_rate(conn, args.date, args.base, args.quote, args.rate, "manual")
+        day = today if args.date == "today" else args.date
+        fx.set_rate(conn, day, args.base, args.quote, args.rate, "manual")
         conn.commit()
-        print("Rate saved")
+        print(f"Rate saved: 1 {args.base} = {args.rate} {args.quote} on {day}")
+    elif args.action == "refresh":
+        res = fx.refresh_current(conn, today, force=True)
+        if res["status"] == "failed":
+            print("Could not fetch a rate (offline or blocked). Enter one with: finance fx set today USD ILS RATE")
+            print(f"  {res['detail']}")
+        else:
+            print(f"USD/ILS {res['rate']} on {res['date']} ({res['source']})")
+    elif args.action == "mode":
+        if args.date:
+            fx.set_mode(conn, args.date)
+        print(f"Dollar assets are valued at: {fx.mode(conn)} rate")
     elif args.action == "fetch":
         n = fx.fetch_boi(conn, date.fromisoformat(args.start), date.fromisoformat(args.end))
         print(f"{n} rate(s) downloaded")
-    elif args.action == "needed":
-        rows = conn.execute("""SELECT DISTINCT b.as_of FROM balances b WHERE b.currency != 'ILS' ORDER BY b.as_of""").fetchall()
-        need = [r[0] for r in rows if fx.rate_on(conn, r[0], "USD", "ILS") is None]
-        if not need:
-            print("Every dollar balance already has a rate on or before its date.")
-        for d in need:
-            print(f"finance fx set {d} USD ILS RATE")
     else:
-        for r in conn.execute("SELECT * FROM fx_rates ORDER BY rate_date DESC LIMIT 20"):
-            print(f"{r['rate_date']} {r['base']}/{r['quote']} {r['rate']} ({r['source']})")
+        cur = fx.current_rate(conn)
+        print(f"Mode: {fx.mode(conn)}. " + (f"Current rate: {cur['rate']:.4f} on {cur['date']} ({cur['source']})" if cur else "No rate yet."))
+        for r in conn.execute("SELECT * FROM fx_rates ORDER BY rate_date DESC LIMIT 10"):
+            print(f"  {r['rate_date']} {r['base']}/{r['quote']} {r['rate']} ({r['source']})")
+
+
+def cmd_sheet(args):
+    home, conn = _open(args)
+    today = args.today or date.today().isoformat()
+    if args.action == "setup":
+        out = home.root / "exports" / "sheet-link-script.gs"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(sheetsync.script_text(conn, args.reset), encoding="utf-8")
+        print(f"Script saved to {out}\n"
+              "1. Open your Google Sheet, then Extensions > Apps Script.\n"
+              "2. Delete what is there, paste the whole script, Save.\n"
+              "3. Deploy > New deployment > Web app. Execute as: Me. Who has access: Anyone. Deploy and allow it.\n"
+              "4. Copy the Web app address and run: finance sheet link ADDRESS\n"
+              "(or paste it on the Sheet page of the dashboard)")
+    elif args.action == "link":
+        if not args.value:
+            sys.exit("Usage: finance sheet link ADDRESS")
+        sheetsync.link(conn, args.value)
+        res = sheetsync.push(conn, today)
+        print(("Linked. " if res["ok"] else "Saved the address, but the first update failed: ") + res["detail"])
+    elif args.action == "sync":
+        res = sheetsync.push(conn, today)
+        print(("Google Sheet updated: " if res["ok"] else "Google Sheet NOT updated: ") + res["detail"])
+    elif args.action == "notes":
+        sheetsync.set_notes(conn, args.value == "on")
+        print(f"Comments {'will' if args.value == 'on' else 'will not'} be sent to the Sheet")
+    elif args.action == "unlink":
+        sheetsync.unlink(conn)
+        print("Unlinked")
+    else:
+        st = sheetsync.status(conn)
+        print("Linked" if st["linked"] else "Not linked. Run: finance sheet setup")
+        if st["linked"]:
+            print(f"Last update: {st['last_sync'] or 'never'}; {st['last_result'] or ''}; comments {'included' if st['notes'] else 'not included'}")
 
 
 def cmd_submit(args):
@@ -293,6 +345,9 @@ def cmd_submit(args):
         sys.exit("Run again with --ack to submit anyway; these are recorded in the commit.")
     row = conn.execute("SELECT committed_at, version FROM commits WHERE id = ?", (cid,)).fetchone()
     print(f"Submitted import #{args.batch} (version {row['version']}) at {row['committed_at']}")
+    msg = sheetsync.sync_if_linked(conn, today)
+    if msg:
+        print(msg)
 
 
 def cmd_reopen(args):
@@ -369,10 +424,12 @@ def build_parser():
     s.add_argument("--as-of"); s.add_argument("--currency"); s.add_argument("--note"); s.set_defaults(fn=cmd_balance)
     s = sub.add_parser("networth"); s.add_argument("--as-of"); s.add_argument("--currency", default="ILS")
     s.add_argument("--owner"); s.set_defaults(fn=cmd_networth)
-    s = sub.add_parser("fx"); s.add_argument("action", choices=["set", "fetch", "list", "needed"])
+    s = sub.add_parser("fx"); s.add_argument("action", choices=["set", "refresh", "mode", "fetch", "list"])
     s.add_argument("date", nargs="?"); s.add_argument("base", nargs="?"); s.add_argument("quote", nargs="?")
     s.add_argument("rate", nargs="?", type=float); s.add_argument("--start"); s.add_argument("--end")
     s.set_defaults(fn=cmd_fx)
+    s = sub.add_parser("sheet"); s.add_argument("action", choices=["setup", "link", "sync", "notes", "unlink", "status"])
+    s.add_argument("value", nargs="?"); s.add_argument("--reset", action="store_true", help="make a new secret"); s.set_defaults(fn=cmd_sheet)
     s = sub.add_parser("submit"); s.add_argument("batch", type=int); s.add_argument("--ack", action="store_true")
     s.add_argument("--author", default="user"); s.set_defaults(fn=cmd_submit)
     s = sub.add_parser("reopen"); s.add_argument("batch", type=int); s.add_argument("--reason", required=True)

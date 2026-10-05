@@ -3,7 +3,9 @@ import sqlite3
 from dataclasses import dataclass, field
 from html import escape as esc
 
-from . import balances, charts, commits, discrepancies, expected, goals, reconcile, summary
+from datetime import date
+
+from . import balances, charts, commits, discrepancies, expected, fx, goals, reconcile, sheetsync, summary
 from .charts import money
 
 
@@ -68,7 +70,7 @@ document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.related
 """
 
 NAV = [("/", "Dashboard"), ("/review", "Review"), ("/items", "Needs attention"), ("/imports", "Imports"),
-       ("/balances", "Balances"), ("/goals", "Goals")]
+       ("/balances", "Balances"), ("/goals", "Goals"), ("/sheet", "Google Sheet")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:
@@ -107,13 +109,23 @@ def _tile(label: str, value: str, detail: str = "") -> str:
 
 
 def _net_worth_series(conn, currency: str):
-    pts, missing = [], 0
+    """Every snapshot valued at today's dollar rate. Returns (points, no_rate)."""
+    pts = []
     for d in [r[0] for r in conn.execute("SELECT DISTINCT as_of FROM balances ORDER BY as_of")]:
         try:
             pts.append((d, balances.net_worth(conn, d, currency)["total"]))
         except LookupError:
-            missing += 1
-    return pts, missing
+            return [], True
+    return pts, False
+
+
+def fx_note(conn, today: str) -> str:
+    cur = fx.current_rate(conn)
+    if not cur:
+        return "no dollar rate yet"
+    age = (date.fromisoformat(today) - date.fromisoformat(cur["date"])).days
+    stale = f" ▲ {age} days old" if age > 3 else ""
+    return f"₪{cur['rate']:.3f} per $ · {cur['source']} · {cur['date']}{stale}"
 
 
 def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
@@ -130,6 +142,12 @@ def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     drafts = conn.execute("SELECT COUNT(*) FROM batches WHERE status != 'committed'").fetchone()[0]
     if drafts:
         out.append(f'<div class="banner">{drafts} import(s) are drafts. Numbers below include them until you submit. <a href="/imports">Review and submit</a></div>')
+    st = sheetsync.status(conn)
+    if not st["linked"]:
+        out.append('<div class="banner">The Google Sheet is not linked yet. Set it up once and it updates itself after every submit. '
+                   '<a href="/sheet">Link it</a></div>')
+    elif st["last_result"] and st["last_result"].startswith("failed"):
+        out.append(f'<div class="banner">The Google Sheet did not update: {esc(st["last_result"][8:])} <a href="/sheet">Details</a></div>')
     items = expected.expected_files(conn, ctx.today)
     late = [i for i in items if i["status"] in ("missing", "due")]
     if late:
@@ -137,10 +155,13 @@ def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         more = f" and {len(late) - 6} more" if len(late) > 6 else ""
         out.append(f'<div class="banner"><b>Files you should have uploaded</b><ul>{rows}</ul>{more}</div>')
 
-    pts, missing_fx = _net_worth_series(conn, cur)
+    pts, no_rate = _net_worth_series(conn, cur)
     nw_now = pts[-1][1] if pts else None
     nw_prev = pts[-2][1] if len(pts) > 1 else None
     change = f"{money(nw_now - nw_prev, cur)} since {pts[-2][0]}" if nw_prev is not None else ""
+    if no_rate:
+        out.append('<div class="banner"><b>No dollar rate yet.</b> Your dollar accounts need today\'s rate to be valued. '
+                   '<a href="/balances">Enter it or fetch it on the Balances page</a>.</div>')
     ov = next((o for o in overview if o["month"] == chosen), None)
     gp = goals.all_progress(conn, ctx.today)
     on = sum(1 for g in gp if g["status"] in ("on_track", "reached"))
@@ -153,10 +174,9 @@ def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
 
     sw = "".join(f'<a href="/?cur={c}{"&month=" + chosen if chosen else ""}">{c}</a> ' for c in ("ILS", "USD"))
     nw_table = charts.data_table(["Date", f"Net worth {cur}"], [[d, f"{v:,.0f}"] for d, v in pts], "Net worth by snapshot date")
-    fx_note = (f'<p class="muted">{missing_fx} snapshot date(s) are left out because they need a USD rate. '
-               f"Run <code>finance fx needed</code>.</p>" if missing_fx else "")
+    rate_note = f'<p class="muted">Dollar accounts valued at {esc(fx_note(conn, ctx.today))} on every date.</p>' if pts else ""
     out.append(f'<div class="grid"><section class="card"><h2>Net worth over time <small>{sw}</small></h2>'
-               f'{charts.line_chart(pts, cur, "Net worth over time")}{fx_note}{nw_table}</section>')
+               f'{charts.line_chart(pts, cur, "Net worth over time")}{rate_note}{nw_table}</section>')
 
     mo = window
     inc = [by_month[m]["income"] if m in by_month else None for m in window]
@@ -354,8 +374,15 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                  f'<span class="muted">Leave a row empty to keep its last value. Loans can be entered as positive numbers.</span></p>')
     add = _form(ctx, "/accounts", f'<div class="row"><input name="label" placeholder="Account name" required> <select name="kind">{kinds}</select> '
                 f'<select name="currency"><option>ILS</option><option>USD</option></select> <select name="owner">{owner_opts}</select> <button class="quiet">Add account</button></div>')
+    cur_rate = fx.current_rate(conn)
+    rate_box = (f'<div class="card" style="margin-bottom:12px"><h2>Dollar rate</h2><p>Dollar accounts are valued at <b>{esc(fx_note(conn, ctx.today))}</b>. '
+                "Expenses are never converted: your cards already charge shekels.</p>"
+                + _form(ctx, "/fx/set", f'<label>Today\'s rate (₪ per $) <input name="rate" inputmode="decimal" size="8" value="{cur_rate["rate"]:.3f}" required></label> '
+                        '<button>Use this rate</button>' if cur_rate else
+                        '<label>Today\'s rate (₪ per $) <input name="rate" inputmode="decimal" size="8" required></label> <button>Use this rate</button>', "row")
+                + _form(ctx, "/fx/refresh", '<button class="quiet">Fetch the current rate automatically</button>', "inline") + "</div>")
     return layout(conn, ctx, "/balances", "Balances",
-                  f'<h1>Balances</h1>{banner}<div class="card">{form}</div><div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
+                  f'<h1>Balances</h1>{banner}{rate_box}<div class="card">{form}</div><div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
 
 
 def _days_ago(today: str, days: int) -> str:
@@ -384,3 +411,30 @@ def goals_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     return layout(conn, ctx, "/goals", "Goals",
                   f'<h1>Goals</h1><div class="card">{cards}</div><div class="card" style="margin-top:12px"><h2>New goal</h2>{add}'
                   f'<p class="muted">Goals by age need a birth date: {birth}</p></div>')
+
+
+def sheet_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    st = sheetsync.status(conn)
+    head = ("<h1>Google Sheet</h1>"
+            + (f'<div class="card"><h2>Linked <span class="chip good"><b>✔</b> on</span></h2><p>Last updated: <b>{esc((st["last_sync"] or "never").replace("T", " "))}</b>. '
+               f'It updates by itself every time you submit an import.</p><p class="muted">{esc(st["last_result"] or "")}</p>'
+               + _form(ctx, "/sheet/sync", "<button>Update it now</button>", "inline") + " "
+               + _form(ctx, "/sheet/notes", f'<label><input type="checkbox" name="notes" value="1" {"checked" if st["notes"] else ""} onchange="this.form.submit()"> '
+                       "Also share comments on items (they may be private)</label>", "inline") + " "
+               + _form(ctx, "/sheet/unlink", '<button class="quiet">Unlink</button>', "inline") + "</div>"
+               if st["linked"] else
+               '<div class="card"><h2>Not linked yet</h2><p>Do this once. After that the sheet updates itself after every submit, '
+               "and only submitted numbers are sent.</p></div>"))
+    script = esc(sheetsync.script_text(conn))
+    steps = ('<div class="card" style="margin-top:12px"><h2>Link it (about 5 minutes, once)</h2><ol>'
+             "<li>Open the Google Sheet you want to share (a new blank one is best).</li>"
+             "<li>Choose <b>Extensions › Apps Script</b>.</li>"
+             "<li>Delete what is there, paste the script below, and click <b>Save</b>.</li>"
+             "<li><b>Deploy › New deployment</b>, type <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. "
+             "Click <b>Deploy</b> and allow it. Google warns that the app is unverified because you wrote it: choose Advanced, then continue.</li>"
+             "<li>Copy the <b>Web app</b> address and paste it here:</li></ol>"
+             + _form(ctx, "/sheet/link", '<input name="url" style="width:100%;max-width:560px" placeholder="https://script.google.com/macros/s/…/exec" required> <button>Link and test</button>', "row")
+             + '<p class="muted">The script contains a secret that only this app knows, so keep it private. '
+               "Anyone with the address still cannot change your sheet without it.</p>"
+             f'<textarea readonly rows="10" style="width:100%;font:12px monospace" onclick="this.select()">{script}</textarea></div>')
+    return layout(conn, ctx, "/sheet", "Google Sheet", head + steps)

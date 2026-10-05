@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import categorize, fx, reconcile
+from . import categorize, reconcile
 from . import discrepancies as dx
 from .archive import plan_path
 from .backup import make_backup, prune
@@ -258,6 +258,5 @@ def import_inbox(home: Home, conn: sqlite3.Connection, today: date | None = None
                                        new, skipped, str(archived.relative_to(home.root))))
 
     if report.batch_id is not None:
-        fx.record_card_rates(conn)
         reconcile.run(conn, report.batch_id, today.isoformat())
     return report

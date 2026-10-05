@@ -205,3 +205,16 @@ def test_history_imports_do_not_flood_needs_attention_and_items_belong_to_their_
     history_batch = conn.execute("SELECT id FROM batches WHERE id != ?", (statement_batch,)).fetchone()[0]
     assert any("Large payment" in i for i in commits.readiness(conn, statement_batch, "2026-10-05"))
     assert not any("Large payment" in i for i in commits.readiness(conn, history_batch, "2026-10-05"))
+
+
+def test_member_card_payments_count_as_spending_and_never_ask_for_a_statement(home, conn, monkeypatch):
+    bank = bank_file([(date(2026, 9, 10), "מקס איט פיננ-י", -769.0), (date(2026, 9, 2), "ל.מאסטרקרד", -150.0)])
+    run_import(home, conn, monkeypatch, [("b.pdf", bank)])
+    missing = [i["title"] for i in _items(conn, "missing_statement")]
+    assert len(missing) == 1 and "150.00" in missing[0]          # the real card still needs its statement; the member card does not
+    row = conn.execute("SELECT t.kind, c.name, t.category_status FROM transactions t JOIN categories c ON c.id = t.category_id "
+                       "WHERE t.description LIKE 'מקס איט%'").fetchone()
+    assert tuple(row) == ("purchase", "Member card (בהצדעה)", "approved")
+    from ftracker import summary
+    assert any(r["category"] == "Member card (בהצדעה)" and r["spent"] == 769.0 for r in summary.spending_by_category(conn, "2026-09"))
+    assert not any("מקס" in i["detail"] for i in expected.expected_files(conn, "2026-10-05"))

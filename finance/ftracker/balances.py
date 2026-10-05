@@ -49,7 +49,7 @@ def net_worth(conn: sqlite3.Connection, as_of: str | None = None, in_currency: s
     for r in latest(conn, as_of):
         if owner and r["owner"] != owner:
             continue
-        value = fx.convert(conn, r["amount"], r["currency"], in_currency, as_of)
+        value = fx.convert_asset(conn, r["amount"], r["currency"], in_currency, as_of)
         total += value
         lines.append({"account": r["label"], "kind": r["kind"], "owner": r["owner"],
                       "as_of": r["as_of"], "native": r["amount"], "currency": r["currency"], "value": value})
