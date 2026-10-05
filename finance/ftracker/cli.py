@@ -2,7 +2,7 @@ import argparse
 import sys
 from datetime import date
 
-from . import accounts, balances, categorize, commits, expected, fx, importer, reconcile, sheet_import, summary
+from . import accounts, balances, categorize, commits, expected, export, fx, goals, importer, reconcile, sheet_import, summary
 from . import discrepancies as dx
 from .config import resolve_home
 from .db import connect
@@ -31,6 +31,9 @@ def cmd_owner(args):
     if args.action == "add":
         accounts.add_owner(conn, args.name, args.alias)
         print(f"Owner {args.name} saved")
+    elif args.action == "birth":
+        goals.set_birth_date(conn, args.name, args.date)
+        print(f"Birth date saved for {args.name}")
     else:
         for r in conn.execute("SELECT o.name, GROUP_CONCAT(a.alias, ', ') AS aliases FROM owners o "
                               "LEFT JOIN owner_aliases a ON a.owner_id = o.id GROUP BY o.id"):
@@ -174,6 +177,39 @@ def cmd_sheet_import(args):
     print(f"Review it with `finance review`, then `finance submit {res['batch_id']}`.")
 
 
+def cmd_goal(args):
+    home, conn = _open(args)
+    today = args.today or date.today().isoformat()
+    if args.action == "add":
+        gid = goals.add_goal(conn, args.name, args.amount, args.currency, args.by, args.age, args.owner,
+                             args.account, args.return_rate)
+        print(f"Goal #{gid} saved")
+        return
+    for p in goals.all_progress(conn, today) if args.action == "list" else [goals.progress(conn, args.goal, today, args.extra)]:
+        pct = f"{p['percent'] * 100:.0f}%" if p["percent"] is not None else "-"
+        print(f"#{p['id']} {p['name']}: {pct} of {_money(p['target'])} {p['currency']}  [{p['status']}]")
+        if p["current"] is not None:
+            print(f"    now {_money(p['current'])}; growing {_money(p['growth_per_month'] or 0)}/month lately")
+        if p["target_date"]:
+            print(f"    target {p['target_date']}: needs {_money(p['required_per_month'])}/month"
+                  + (f", short by {_money(p['gap_per_month'])}/month" if p["gap_per_month"] else ""))
+        if p["projected_date"]:
+            print(f"    at this pace: reached about {p['projected_date'][:7]}")
+        if p.get("note"):
+            print(f"    {p['note']}")
+
+
+def cmd_export(args):
+    home, conn = _open(args)
+    from pathlib import Path
+    out = Path(args.out) if args.out else home.root / "exports" / f"finance-summary-{date.today():%Y-%m-%d}.xlsx"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    res = export.export_workbook(conn, out, args.today or date.today().isoformat(), args.notes)
+    print(f"Saved {out}\n  {res['months']} submitted month(s); {res['drafts_excluded']} draft import(s) left out"
+          + ("; notes included" if args.notes else "; notes not included (add --notes to share them)"))
+    print("Upload it to Google Drive and open it as a Google Sheet, or File > Import into the shared sheet.")
+
+
 def cmd_items(args):
     home, conn = _open(args)
     statuses = ("open", "explained", "resolved", "acknowledged") if args.all else ("open", "explained")
@@ -281,7 +317,7 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("init"); s.add_argument("--owner", action="append"); s.set_defaults(fn=cmd_init)
-    s = sub.add_parser("owner"); s.add_argument("action", choices=["add", "list"]); s.add_argument("name", nargs="?")
+    s = sub.add_parser("owner"); s.add_argument("action", choices=["add", "list", "birth"]); s.add_argument("name", nargs="?"); s.add_argument("date", nargs="?")
     s.add_argument("--alias", action="append"); s.set_defaults(fn=cmd_owner)
     s = sub.add_parser("account")
     s.add_argument("action", choices=["add", "list", "set-owner", "pays-from", "destination", "destination-rule"])
@@ -304,6 +340,14 @@ def build_parser():
     s.add_argument("--link", action="append", metavar="SHEET_ACCOUNT=ACCOUNT")
     s.add_argument("--primary-owner", default="Ely"); s.add_argument("--partner-owner", default="Shir")
     s.add_argument("--high-level-year", type=int, default=2026); s.set_defaults(fn=cmd_sheet_import)
+    s = sub.add_parser("goal"); s.add_argument("action", choices=["add", "list", "progress"])
+    s.add_argument("--name"); s.add_argument("--amount", type=float); s.add_argument("--currency", default="ILS")
+    s.add_argument("--by", help="target date YYYY-MM-DD"); s.add_argument("--age", type=int)
+    s.add_argument("--owner"); s.add_argument("--account", action="append"); s.add_argument("--return-rate", type=float, default=0.0)
+    s.add_argument("--goal", type=int); s.add_argument("--extra", type=float, default=0.0)
+    s.set_defaults(fn=cmd_goal)
+    s = sub.add_parser("export"); s.add_argument("--out"); s.add_argument("--notes", action="store_true")
+    s.set_defaults(fn=cmd_export)
     s = sub.add_parser("items"); s.add_argument("--all", action="store_true")
     s.add_argument("--threads", action="store_true"); s.set_defaults(fn=cmd_items)
     s = sub.add_parser("comment"); s.add_argument("item", type=int); s.add_argument("text")

@@ -23,7 +23,7 @@ finance = "ftracker.cli:main"
 include = ["ftracker*"]
 
 [tool.setuptools.package-data]
-ftracker = ["schema.sql"]
+ftracker = ["schema.sql", "migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
