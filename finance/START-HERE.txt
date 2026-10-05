@@ -4,14 +4,19 @@ Everything stays on your computer. Nothing is sent anywhere except the Google Sh
 
 ONE TIME SETUP
 1. Install Python: go to python.org/downloads, download it, run it, and TICK "Add python to PATH".
-2. Unzip this folder somewhere simple, for example C:\FinanceApp
-   (not inside OneDrive or Google Drive).
-3. Double-click  setup.bat  and wait until it says "Done". It makes your data folder:
-   C:\Users\<you>\Finance   (inbox, archive, data, backups)
+   Then restart the computer once.
+2. Before unzipping: right-click the downloaded zip > Properties > tick "Unblock" > OK.
+   (This stops Windows from blocking the files.) Then right-click the zip > Extract All, to a
+   simple folder such as C:\FinanceApp  (not inside OneDrive or Google Drive).
+3. Open that folder and double-click  setup.bat .
+   A black window opens and prints steps [1/4] to [4/4]. The install step takes 2 to 5 minutes and
+   shows moving text; that is normal. Wait for the word DONE.
+   - If Windows says "Windows protected your PC": click "More info", then "Run anyway".
 4. Double-click  first-run-rules.bat  (only if it is in this folder). It sets up your income rules.
 5. Your old budget sheet: in Google Sheets choose File > Download > Microsoft Excel (.xlsx).
-   Then drag that downloaded file onto  import-old-sheet.bat . It shows a preview. Type Y to save.
-6. Double-click  dashboard.bat . Your browser opens the dashboard.
+   Then DRAG that downloaded file onto the icon  import-old-sheet.bat . It shows a preview.
+   Type Y and press Enter to save.
+6. Double-click  dashboard.bat . Your browser opens the dashboard. Keep the black window open while you use it.
    - Balances tab: type today's balances (the dollar rate is fetched for you).
    - Google Sheet tab: follow the 5 steps once to link your shared sheet.
 
@@ -22,6 +27,10 @@ EVERY TWO MONTHS (or monthly)
    Review tab -> approve categories.  Needs attention tab -> comment on anything odd.
    Imports tab -> Submit.  (The Google Sheet updates by itself.)
 
-IF SOMETHING GOES WRONG
-- A black window shows a message: take a photo or copy the text and send it to me.
+IF A WINDOW OPENS AND NOTHING SEEMS TO HAPPEN
+- Wait a few minutes during step [3/4]: it is downloading and installing.
+- If a window flashes and closes, or you see nothing: open the app folder in File Explorer, click the
+  address bar at the top, type  cmd  and press Enter. In the black window type  setup.bat  and press
+  Enter. Now any error stays on screen.
+- Take a photo or copy the text and send it to me.
 - Your data is backed up automatically in the "backups" folder before every import.
