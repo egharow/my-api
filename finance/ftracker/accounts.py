@@ -83,11 +83,16 @@ def set_destination_rule(conn: sqlite3.Connection, pattern: str, account_ref: st
     if not cat:
         raise ValueError(f"unknown category {category!r}")
     pat = norm_description(pattern)
-    conn.execute(
-        """INSERT INTO rules (source, pattern, direction, account_kind, category_id, set_kind,
-                              counterparty_account_id, auto_approve, priority, note, created_at)
-           VALUES ('user', ?, 'out', 'bank', ?, 'transfer', ?, 1, ?, ?, ?)""",
-        (pat, cat["id"], acct["id"], 1000 + len(pat), f"transfers go to {acct['label']}", now()))
+    if conn.execute("SELECT 1 FROM rules WHERE source = 'user' AND pattern = ? AND counterparty_account_id = ?",
+                    (pat, acct["id"])).fetchone():
+        conn.execute("UPDATE rules SET category_id = ?, enabled = 1 WHERE source = 'user' AND pattern = ? AND counterparty_account_id = ?",
+                     (cat["id"], pat, acct["id"]))      # saying it twice changes nothing
+    else:
+        conn.execute(
+            """INSERT INTO rules (source, pattern, direction, account_kind, category_id, set_kind,
+                                  counterparty_account_id, auto_approve, priority, note, created_at)
+               VALUES ('user', ?, 'out', 'bank', ?, 'transfer', ?, 1, ?, ?, ?)""",
+            (pat, cat["id"], acct["id"], 1000 + len(pat), f"transfers go to {acct['label']}", now()))
     cur = conn.execute(
         """UPDATE transactions SET counterparty_account_id = ?, category_id = ?, category_status = 'approved',
                   kind = 'transfer', proposal_basis = 'your destination rule', confidence = 1.0

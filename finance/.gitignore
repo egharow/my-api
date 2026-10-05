@@ -9,3 +9,7 @@ backups/
 .venv/
 __pycache__/
 *.egg-info/
+
+# personal first-run helpers: shipped in the zip made for the owner, never committed
+first_run_rules.py
+first-run-rules.bat

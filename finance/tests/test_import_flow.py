@@ -218,3 +218,11 @@ def test_member_card_payments_count_as_spending_and_never_ask_for_a_statement(ho
     from ftracker import summary
     assert any(r["category"] == "Member card (בהצדעה)" and r["spent"] == 769.0 for r in summary.spending_by_category(conn, "2026-09"))
     assert not any("מקס" in i["detail"] for i in expected.expected_files(conn, "2026-10-05"))
+
+
+def test_saying_the_same_destination_rule_twice_changes_nothing(conn):
+    accounts.add_owner(conn, "Ely")
+    accounts.add_account(conn, "savings", "x", "One Zero", "Ely")
+    accounts.set_destination_rule(conn, "העברה דיגיטל", "One Zero")
+    accounts.set_destination_rule(conn, "העברה דיגיטל", "One Zero")
+    assert conn.execute("SELECT COUNT(*) FROM rules WHERE source = 'user'").fetchone()[0] == 1
