@@ -222,7 +222,12 @@ class App:
                 if not rep.files:
                     return self._redirect("/imports", "The inbox is empty.", err=True)
                 bad = [f for f in rep.files if f.status == "unrecognised"]
-                msg = f"{len(rep.imported)} file(s) imported" + (f"; {len(bad)} not recognised (see inbox/_unrecognised)" if bad else "")
+                dup = [f for f in rep.files if f.status == "duplicate"]
+                msg = f"{len(rep.imported)} file(s) imported"
+                if dup:
+                    msg += f"; {len(dup)} had already been imported, so nothing was added twice"
+                if bad:
+                    msg += f"; {len(bad)} not recognised ({', '.join(f.name for f in bad[:3])})"
                 return self._redirect("/imports", msg, err=bool(bad))
             if len(m) == 4 and m[1] == "imports" and m[3] == "submit":
                 try:
