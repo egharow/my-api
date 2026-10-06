@@ -14,13 +14,19 @@ Everything stays on your computer. Nothing is sent anywhere except the Google Sh
    1. Upload: drop the statements; the checklist ticks each one as it arrives.
    2. Review: confirm the proposed categories (it learns from your choices).
    3. Check anything flagged as a problem.
-   4. Balances: type your numbers every 2 months.
+   4. Balances: type your numbers every month.
    5. Submit, so the numbers are recorded with the date.
    Spending and Wealth show the trends (bars by month, net worth over time, goals).
    Settings has "Put an icon on my desktop", so you never need this folder again.
 
-NEW STATEMENTS (every month or two)
+NEW STATEMENTS (every month)
 Open the app, go to Upload and DRAG the files onto the box. That is all.
+
+UPDATING THE APP LATER
+The folder has two parts that never mix: "app" (the program) and "my-data" (everything you entered).
+An update (FinanceUpdate.zip) only ever contains the program. Extract it into this same folder and click
+"Replace the files". Your data is never in it, so nothing of yours can be replaced or lost.
+Never delete or replace the "my-data" folder. Copy it somewhere safe now and then as a backup.
 
 CLOSING
 Close the window. The app stops by itself after a couple of minutes. (Or use the Quit button.)
@@ -30,5 +36,5 @@ IF SOMETHING GOES WRONG
 - If Windows says "Windows protected your PC": click More info, then Run anyway.
 - If the setup window shows an error: click "Copy the details" and send it to me.
   The same text is saved in launcher-log.txt next to Finance.pyw.
-- Later problems are written to app-log.txt inside C:\Users\<you>\Finance.
-- Your data is backed up automatically in C:\Users\<you>\Finance\backups before every import.
+- Later problems are written to app-log.txt inside the my-data folder.
+- Your data is backed up automatically in my-data\backups before every import.

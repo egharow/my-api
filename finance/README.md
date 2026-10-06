@@ -43,7 +43,7 @@ type the rate (`finance fx set today USD ILS 3.6`) and tell me what the message 
 If a `starter_rules.json` and a `seed/` folder (history.xlsx, statements/) sit next to `Finance.pyw`, they are
 loaded once on first launch. They are private and never committed to git.
 
-Data lives in `C:\Users\<you>\Finance` (override with FINANCE_HOME): `data` (database), `archive` (originals,
+Data lives in the `my-data` folder next to `app` (older versions used `C:\Users\<you>\Finance`, which is copied over on first start; override with FINANCE_HOME): `data` (database), `archive` (originals,
 filed by card/account), `backups` (before every import), `app-log.txt`.
 
 ## Setup without typing commands

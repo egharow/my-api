@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_home, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
-from .config import Home
+from .config import Home, migrate_legacy
 from .db import connect
 
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
@@ -398,6 +398,9 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
                 appmode.open_window(f"http://localhost:{port}/")
                 return
             port = appmode.pick_port(port + 1)
+    moved = migrate_legacy(home)
+    if moved:
+        print(moved)
     conn = connect(home.db_path)
     try:
         need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn)

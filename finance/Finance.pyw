@@ -13,7 +13,10 @@ import traceback
 from pathlib import Path
 
 APP = Path(__file__).resolve().parent
+# Packaged layout: Finance.pyw, app/ (replaced when updating), my-data/ (never replaced), .venv (made once).
+PROGRAM = APP / "app" if (APP / "app" / "ftracker").exists() else APP
 VENV = APP / ".venv"
+DEPS_STAMP = VENV / ".deps-hash"
 LOG = APP / "launcher-log.txt"
 LOCK = APP / ".setup.lock"
 IS_WIN = os.name == "nt"
@@ -33,9 +36,22 @@ def venv_python(windowed: bool = False) -> Path:
     return VENV / "bin" / "python"
 
 
+def deps_hash() -> str:
+    import hashlib
+    try:
+        return hashlib.sha256((PROGRAM / "pyproject.toml").read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
 def ready() -> bool:
     py = venv_python()
     if not py.exists():
+        return False
+    try:                      # an update that changes the needed packages triggers one quiet reinstall
+        if DEPS_STAMP.read_text().strip() != deps_hash():
+            return False
+    except OSError:
         return False
     result = subprocess.run([str(py), "-c", "import ftracker, openpyxl, xlrd, pdfplumber"],
                             capture_output=True, creationflags=NO_WINDOW)
@@ -49,7 +65,7 @@ PORTS = range(8765, 8795)
 def start_app() -> subprocess.Popen:
     """Start the app detached from this launcher. Its messages go to app-start-log.txt, so a failure is never silent."""
     out = open(START_LOG, "w", encoding="utf-8")
-    return subprocess.Popen([str(venv_python()), "-m", "ftracker", "app"], cwd=str(APP), creationflags=DETACHED | NO_WINDOW,
+    return subprocess.Popen([str(venv_python()), "-m", "ftracker", "app"], cwd=str(PROGRAM), creationflags=DETACHED | NO_WINDOW,
                             close_fds=True, stdin=subprocess.DEVNULL, stdout=out, stderr=out)
 
 
@@ -92,7 +108,7 @@ def launch() -> None:
         up = health()
     if not up:
         exited = proc.poll()
-        found = [p for p in (START_LOG, APP / "data" / "app-log.txt", Path.home() / "Finance" / "app-log.txt") if p.exists()]
+        found = [p for p in (START_LOG, APP / "my-data" / "app-log.txt", Path.home() / "Finance" / "app-log.txt") if p.exists()]
         details = "\n".join(tail(p, 12) for p in found).strip()
         what = (f"The app stopped right away (exit code {exited})." if exited is not None
                 else "The app was still not answering after 5 minutes.")
@@ -137,8 +153,9 @@ def set_up(log) -> None:
         run([base_python(), "-m", "venv", str(VENV)], log)
     log("Step 2 of 3: installing the app. This is the slow part; text keeps moving while it works...")
     run([str(venv_python()), "-m", "pip", "install", "--upgrade", "pip"], log)
-    run([str(venv_python()), "-m", "pip", "install", "-e", str(APP)], log)
+    run([str(venv_python()), "-m", "pip", "install", "-e", str(PROGRAM)], log)
     log("Step 3 of 3: checking the install...")
+    DEPS_STAMP.write_text(deps_hash())
     if not ready():
         raise SetupFailed("The app installed but could not be loaded.")
     log("Done. Opening the app...")
