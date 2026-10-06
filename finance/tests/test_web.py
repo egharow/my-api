@@ -196,3 +196,10 @@ def test_wealth_filter_leaves_chosen_accounts_out_everywhere(app, conn):
 def test_spending_includes_bank_statement_lines(app):
     t = text(get(app, "/spending"))
     assert "Where it was recorded" in t and "bank statements" in t
+
+
+def test_category_drill_down_shows_merchants_and_every_payment(app):
+    t = text(get(app, "/spending?cat=Food"))
+    assert "What makes up Food" in t and "Every payment" in t and "Biggest merchants" in t
+    month = text(get(app, "/spending?cat=Food&month=2025-03"))
+    assert "2025-03 only" in month

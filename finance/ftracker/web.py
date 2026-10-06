@@ -41,7 +41,7 @@ def _html(status: int, text: str, extra=None) -> Response:
 
 LOADING_PAGE = ("<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=2><title>Finance · loading</title>"
                 "<body style='font:16px system-ui;max-width:460px;margin:80px auto;text-align:center'>"
-                "<h2>Loading your data…</h2><p>The first start reads your old sheet and statements. This takes a minute, once.</p>"
+                "<h2>Loading your data…</h2><p>The first start, and the first start after an update, can take about a minute. Then it opens by itself.</p>"
                 "<script>fetch('/ping').catch(function(){})</script>")
 
 

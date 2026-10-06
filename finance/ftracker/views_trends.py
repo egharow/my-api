@@ -4,6 +4,7 @@ from html import escape as esc
 
 from . import balances, charts, fx, summary
 from .charts import money
+from .normalize import merchant_key
 from .views import Ctx, _form, _month_window, _tile
 
 KIND_LABEL = {"bank": "Bank accounts", "savings": "Savings", "investment": "Investments", "pension": "Pension & provident funds",
@@ -175,9 +176,40 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
                 f'{_switch(base, owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"range": rng})}</p>')
 
     if cat in cat_total:
-        main = (f'<section class="card"><h2>{esc(cat)} by month <small><a href="{base}?range={rng}">back to all</a></small></h2>'
+        pick = q.get("month") if q.get("month") in have else None
+        lines = summary.category_lines(conn, cat, [pick] if pick else have, owner)
+        owner_q = "&owner=" + esc(owner) if owner else ""
+        month_chips = " ".join(
+            f'<a href="{base}?range={rng}&cat={esc(cat)}&month={m}{owner_q}"{" style=font-weight:700" if m == pick else ""}>{esc(m[2:])}</a>' for m in have)
+        by_sub: dict[str, float] = {}
+        by_merchant: dict[str, list] = {}
+        for l in lines:
+            by_sub[l["subcategory"]] = by_sub.get(l["subcategory"], 0) + l["spent"]
+            m = by_merchant.setdefault(merchant_key(l["description"]) or l["description"], [0.0, 0, l["description"]])
+            m[0] += l["spent"]
+            m[1] += 1
+        total_shown = sum(l["spent"] for l in lines) or 1
+        subs = ""
+        if len(by_sub) > 1:
+            subs = "<h3>Sub-categories</h3>" + charts.hbars([(k, v, f"{k}: {money(v)}") for k, v in sorted(by_sub.items(), key=lambda kv: -kv[1]) if v > 0])
+        top = sorted(by_merchant.items(), key=lambda kv: -kv[1][0])[:15]
+        merchants = ('<h3>Biggest merchants</h3>' + charts.hbars([(v[2], v[0], f"{v[1]} payment(s)") for _, v in top if v[0] > 0])) if top else ""
+        rows = "".join(
+            f'<tr><td>{esc(l["txn_date"])}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
+            f'<td>{esc(l["subcategory"])}{" ?" if l["category_status"] == "proposed" else ""}</td><td class="n">{l["spent"]:,.2f}</td></tr>'
+            for l in lines[:400])
+        more = f'<p class="muted">Showing the newest 400 of {len(lines)}.</p>' if len(lines) > 400 else ""
+        scope = f"{esc(pick)} only" if pick else f"all {len(have)} months"
+        main = (f'<section class="card"><h2>{esc(cat)} by month <small><a href="{base}?range={rng}{owner_q}">back to all</a></small></h2>'
                 f'{charts.bar_chart(series(cat), "ILS", cat + " by month")}'
-                f'<p class="muted">Total {esc(money(cat_total[cat]))}, average {esc(money(cat_total[cat] / len(have)))} a month.</p></section>')
+                f'<p class="muted">Total {esc(money(cat_total[cat]))}, average {esc(money(cat_total[cat] / len(have)))} a month.</p>'
+                f'<p>Look at one month: {month_chips} · <a href="{base}?range={rng}&cat={esc(cat)}{owner_q}">all months</a></p></section>'
+                f'<section class="card" style="margin-top:16px"><h2>What makes up {esc(cat)} <small>({scope}: {esc(money(total_shown if lines else 0))})</small></h2>'
+                f'{subs}{merchants}</section>'
+                f'<section class="card" style="margin-top:16px"><h2>Every payment ({len(lines)})</h2>'
+                f'<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Description</th><th>Account</th><th>Category</th><th class="n">Amount ₪</th></tr></thead>'
+                f'<tbody>{rows}</tbody></table></div>{more}'
+                f'<p class="muted">A “?” means the category is only proposed so far. Refunds show as negative amounts.</p></section>')
         small = ""
     else:
         main = (f'<section class="card"><h2>Total spending by month</h2>{charts.bar_chart(series(None), "ILS", "Spending by month")}</section>')
@@ -189,7 +221,7 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
     head = "".join(f"<th class='n'>{esc(m[2:])}</th>" for m in have)
     rows = []
     for c in ranked:
-        cells = "".join(f'<td class="n">{data[m].get(c, 0):,.0f}</td>' for m in have)
+        cells = "".join(f'<td class="n"><a href="{base}?range={rng}&cat={esc(c)}&month={m}{"&owner=" + esc(owner) if owner else ""}">{data[m].get(c, 0):,.0f}</a></td>' for m in have)
         rows.append(f'<tr><td dir="auto"><a href="{base}?range={rng}&cat={esc(c)}{"&owner=" + esc(owner) if owner else ""}">{esc(c)}</a></td>{cells}'
                     f'<td class="n"><b>{cat_total[c]:,.0f}</b></td><td class="n">{cat_total[c] / len(have):,.0f}</td></tr>')
     foot = "".join(f'<td class="n"><b>{totals[m]:,.0f}</b></td>' for m in have)

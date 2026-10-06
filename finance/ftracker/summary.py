@@ -112,3 +112,21 @@ def months_available(conn: sqlite3.Connection, committed_only: bool = False) -> 
     where = " WHERE batch_id IN (SELECT id FROM batches WHERE status = 'committed')" if committed_only else ""
     rows = conn.execute(f"SELECT budget_month FROM transactions{where} UNION SELECT month FROM monthly_entries{where} ORDER BY 1").fetchall()
     return [r[0] for r in rows]
+
+
+def category_lines(conn: sqlite3.Connection, category: str, months: list[str], owner: str | None = None):
+    """Every payment behind one category total (the category and its sub-categories), newest first."""
+    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'",
+             "COALESCE(p.name, c.name) = ?", f"t.budget_month IN ({','.join('?' * len(months))})"]
+    args: list = [category, *months]
+    if not include_reimbursed(conn):
+        where.append("c.reimbursed = 0")
+    if owner:
+        where.append("o.name = ?")
+        args.append(owner)
+    return conn.execute(
+        f"""SELECT t.id, t.txn_date, t.budget_month, t.description, -t.amount AS spent, a.label AS account, a.kind AS account_kind,
+                   c.name AS subcategory, t.category_status
+            FROM transactions t JOIN categories c ON c.id = t.category_id LEFT JOIN categories p ON p.id = c.parent_id
+            JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
+            WHERE {' AND '.join(where)} ORDER BY t.txn_date DESC, t.id DESC""", args).fetchall()
