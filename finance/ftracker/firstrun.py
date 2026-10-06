@@ -104,7 +104,7 @@ def dismiss_notice(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-REPAIR_KEY = "repair_old_sheet_categories_v4"
+REPAIR_KEY = "repair_old_sheet_categories_v5"
 
 
 def merge_duplicate_leumi(conn: sqlite3.Connection) -> bool:
@@ -122,7 +122,29 @@ def repair_done(conn: sqlite3.Connection) -> bool:
     return conn.execute("SELECT 1 FROM settings WHERE key = ?", (REPAIR_KEY,)).fetchone() is not None
 
 
-def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
+def import_missing_statements(conn: sqlite3.Connection, home: Home, app_dir: Path, today: date | None = None) -> int:
+    """Import any statement you gave me that is not in your data yet (for example one that failed on an earlier start)."""
+    folder = seed_dir(app_dir) / "statements"
+    if not folder.exists():
+        return 0
+    missing = [p for p in sorted(folder.glob("*")) if p.is_file()
+               and not conn.execute("SELECT 1 FROM source_files WHERE sha256 = ?", (importer.sha256(p),)).fetchone()]
+    if not missing:
+        return 0
+    home.inbox.mkdir(parents=True, exist_ok=True)
+    for p in missing:
+        shutil.copy2(p, home.inbox / p.name)
+    try:
+        report = importer.import_inbox(home, conn, today or date.today())
+    except Exception:
+        print(traceback.format_exc())
+        return 0
+    for f in report.files:
+        print(f"statement {f.name}: {f.status}" + (f" ({getattr(f, 'detail', '')})" if getattr(f, 'detail', '') else ""))
+    return sum(1 for f in report.files if f.status == "imported")
+
+
+def repair(conn: sqlite3.Connection, app_dir: Path, home: Home | None = None) -> int:
     """One-time: restore categories you set in the old sheet that an earlier build overrode (Bit lines, Investment)."""
     if conn.execute("SELECT 1 FROM settings WHERE key = ?", (REPAIR_KEY,)).fetchone():
         return 0
@@ -131,6 +153,8 @@ def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
     if history.exists():
         fixed = sheet_import.restore_categories(conn, sheet_import.parse_workbook(history))
     categorize.resuggest(conn)
+    if home is not None:
+        import_missing_statements(conn, home, app_dir)
     merge_duplicate_leumi(conn)
     _set(conn, REPAIR_KEY, str(fixed))
     conn.commit()

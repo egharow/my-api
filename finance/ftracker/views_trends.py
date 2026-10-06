@@ -2,7 +2,7 @@
 import sqlite3
 from html import escape as esc
 
-from . import balances, charts, summary
+from . import balances, charts, fx, summary
 from .charts import money
 from .views import Ctx, _form, _month_window, _tile
 
@@ -16,6 +16,39 @@ def _switch(base: str, current: str, options: list[tuple[str, str]], key: str, k
         params = {**keep, key: v}
         return base + "?" + "&".join(f"{k}={esc(str(x))}" for k, x in params.items() if x)
     return " ".join(f'<a href="{href(v)}"{" style=font-weight:700" if v == current else ""}>{esc(t)}</a>' for v, t in options)
+
+
+def _filter_panel(conn: sqlite3.Connection, ctx: Ctx, cur: str) -> str:
+    """Pick which accounts count toward net worth. Saved, so it applies everywhere net worth is shown."""
+    rows = balances.latest(conn, ctx.today)
+    if not rows:
+        return ""
+    off = [r for r in rows if not r["in_wealth"]]
+    groups: dict[str, list] = {}
+    for r in rows:
+        groups.setdefault(r["kind"], []).append(r)
+    body = []
+    for kind in sorted(groups, key=lambda k: KIND_ORDER.index(k) if k in KIND_ORDER else 99):
+        items = sorted(groups[kind], key=lambda r: (r["owner"] or "", r["label"]))
+        all_on = all(r["in_wealth"] for r in items)
+        body.append(f'<tr class="grp"><td><input type="checkbox" aria-label="All {esc(KIND_LABEL.get(kind, kind))}" {"checked" if all_on else ""} '
+                    f'onchange="document.querySelectorAll(\'.k-{esc(kind)}\').forEach(function(c){{c.checked=this.checked}}.bind(this))"></td>'
+                    f'<td colspan="3"><b>{esc(KIND_LABEL.get(kind, kind))}</b></td></tr>')
+        for r in items:
+            try:
+                val = money(fx.convert_asset(conn, r["amount"], r["currency"], cur, r["as_of"]), cur)
+            except LookupError:
+                val = money(r["amount"], r["currency"])
+            body.append(f'<tr><td><input type="checkbox" class="k-{esc(kind)}" name="inc_{r["account_id"]}" value="1" {"checked" if r["in_wealth"] else ""}>'
+                        f'<input type="hidden" name="shown" value="{r["account_id"]}"></td>'
+                        f'<td dir="auto">{esc(r["label"])}</td><td>{esc(r["owner"] or "")}</td><td class="n">{esc(val)}</td></tr>')
+    form = _form(ctx, "/wealth/include",
+                 f'<div style="overflow-x:auto"><table><thead><tr><th></th><th>Account</th><th>Owner</th><th class="n">Value ({cur})</th></tr></thead>'
+                 f'<tbody>{"".join(body)}</tbody></table></div><p><button>Apply</button> '
+                 '<span class="muted">Ticked accounts count toward net worth. This is remembered.</span></p>')
+    state = (f'<div class="banner">Not counting {len(off)} account(s): ' + ", ".join(esc(r["label"]) for r in off[:6])
+             + (f" and {len(off) - 6} more" if len(off) > 6 else "") + ".</div>") if off else ""
+    return f'{state}<details class="card" style="margin-bottom:12px"{" open" if off else ""}><summary><b>Choose what counts in net worth</b></summary>{form}</details>'
 
 
 def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wealth") -> str:
@@ -74,7 +107,7 @@ def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wea
               f'typed value until you enter a new one. Dollar accounts use the current rate for every date, so the chart shows how your assets '
               f'moved, not the exchange rate.</p>')
     deltas = [(snaps[i]["as_of"], snaps[i]["total"] - snaps[i - 1]["total"]) for i in range(1, len(snaps))]
-    html = (f'<p>{who} &nbsp;·&nbsp; {money_sw}</p>{tiles}{source}'
+    html = (f'<p>{who} &nbsp;·&nbsp; {money_sw}</p>{_filter_panel(conn, ctx, cur)}{tiles}{source}'
             f'<section class="card"><h2>Total over time</h2>{charts.line_chart(pts, cur, "Net worth over time")}</section>'
             f'<section class="card" style="margin-top:16px"><h2>Change between updates</h2>{charts.bar_chart(deltas, cur, "Net worth change", signed=True)}'
             f'<p class="muted">Blue: it grew. Orange: it fell. Each bar is the change since the previous update of your balances.</p></section>'
@@ -124,6 +157,11 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
     def series(c):
         return [(m, data[m].get(c, 0.0) if c else totals[m]) for m in have]
 
+    src = summary.spending_by_source(conn, have, owner)
+    parts = [f"cards {money(src.get('card', 0))}", f"bank statements (mortgage, loans, fees, direct debits) {money(src.get('bank', 0))}"]
+    if src.get("sheet"):
+        parts.append(f"your old budget sheet {money(src['sheet'])}")
+    source_note = f'<p class="muted">Where it was recorded: {esc(" · ".join(parts))}.</p>'
     reimb = ""
     inc_r = summary.include_reimbursed(conn)
     reimb = _form(ctx, "/setting/reimbursed",
@@ -159,5 +197,5 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
               f'<thead><tr><th>Category</th>{head}<th class="n">Total</th><th class="n">Avg / month</th></tr></thead><tbody>{"".join(rows)}</tbody>'
               f'<tfoot><tr><td><b>Total</b></td>{foot}<td class="n"><b>{grand:,.0f}</b></td><td class="n"><b>{avg:,.0f}</b></td></tr></tfoot></table></div>'
               f'<p class="muted">Amounts in ₪, by billing month. Card payments and transfers between your own accounts are not counted.</p></section>')
-    html = f'{controls}{tiles}<p>{esc(trend_note)}</p>{reimb}{main}{small}{matrix}'
+    html = f'{controls}{tiles}<p>{esc(trend_note)}</p>{source_note}{reimb}{main}{small}{matrix}'
     return html

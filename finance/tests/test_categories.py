@@ -169,3 +169,19 @@ def test_duplicate_leumi_accounts_are_merged_with_their_balances(tmp_path):
     assert [(r["account_id"], r["amount"]) for r in rows] == [(b, 100.0), (b, 250.0)]
     assert conn.execute("SELECT active FROM accounts WHERE id = ?", (a,)).fetchone()[0] == 0
     assert firstrun.merge_duplicate_leumi(conn) is False
+
+
+def test_statements_missing_from_the_data_are_imported_on_startup(conn, home, tmp_path, monkeypatch):
+    from ftracker import importer
+    appdir = tmp_path / "ad"; (appdir / "seed" / "statements").mkdir(parents=True)
+    names = {"isra.xlsx": card_file(issuer="isracard", last4="6097"), "amex.xls": card_file(issuer="amex", last4="8542", billing=date(2026, 10, 2))}
+    for i, n in enumerate(names):
+        (appdir / "seed" / "statements" / n).write_bytes(f"{n}-{i}".encode())
+    monkeypatch.setattr(importer, "parse_file", lambda path: names[path.name])
+    shutil_copy = (appdir / "seed" / "statements" / "isra.xlsx")
+    (home.inbox / "isra.xlsx").write_bytes(shutil_copy.read_bytes())
+    importer.import_inbox(home, conn, date(2026, 10, 5))                      # only the first one got in earlier
+    assert conn.execute("SELECT COUNT(*) FROM source_files").fetchone()[0] == 1
+    assert firstrun.import_missing_statements(conn, home, appdir, date(2026, 10, 5)) == 1
+    assert conn.execute("SELECT COUNT(*) FROM source_files").fetchone()[0] == 2
+    assert firstrun.import_missing_statements(conn, home, appdir, date(2026, 10, 5)) == 0

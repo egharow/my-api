@@ -58,6 +58,27 @@ def spending_by_category(conn: sqlite3.Connection, month: str | None = None, own
             GROUP BY category, subcategory ORDER BY spent DESC""", args).fetchall()
 
 
+def spending_by_source(conn: sqlite3.Connection, months: list[str], owner: str | None = None) -> dict[str, float]:
+    """Spending split by where it was recorded: card statements, bank statements, or your old budget sheet."""
+    if not months:
+        return {}
+    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'",
+             f"t.budget_month IN ({','.join('?' * len(months))})"]
+    args: list = list(months)
+    if not include_reimbursed(conn):
+        where.append("c.reimbursed = 0")
+    if owner:
+        where.append("o.name = ?")
+        args.append(owner)
+    out = {"card": 0.0, "bank": 0.0, "sheet": 0.0}
+    for r in conn.execute(
+            f"""SELECT CASE WHEN a.issuer = 'sheet' THEN 'sheet' ELSE a.kind END AS src, ROUND(SUM(-t.amount), 2) AS spent
+                FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)} GROUP BY src""", args):
+        out[r["src"] if r["src"] in out else "bank"] += r["spent"]
+    return out
+
+
 def month_overview(conn: sqlite3.Connection, month: str, committed_only: bool = False):
     """Income, spending and savings for a month.
 

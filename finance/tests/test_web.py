@@ -177,3 +177,22 @@ def test_upload_page_lists_cal_card_expandable_balances_and_sheet_link(app):
     assert "Cal 5962" in u
     assert "Balances (monthly)" in u and "show which" in u
     assert "Google Sheet (optional)" in u and 'name="back" value="/upload"' in u
+
+
+def test_wealth_filter_leaves_chosen_accounts_out_everywhere(app, conn):
+    before = balances.net_worth(conn, "2026-10-05")["total"]
+    ids = [r["account_id"] for r in balances.latest(conn, "2026-10-05")]
+    assert ids
+    page = text(get(app, "/wealth"))
+    assert "Choose what counts in net worth" in page and "/wealth/include" in page
+    keep = ids[1:]
+    post(app, "/wealth/include", {"shown": [str(i) for i in ids], **{f"inc_{i}": "1" for i in keep}})
+    after = balances.net_worth(conn, "2026-10-05")["total"]
+    assert after < before or before == 0
+    assert "Not counting 1 account(s)" in text(get(app, "/wealth"))
+    assert balances.net_worth(conn, "2026-10-05", everything=True)["total"] == before
+
+
+def test_spending_includes_bank_statement_lines(app):
+    t = text(get(app, "/spending"))
+    assert "Where it was recorded" in t and "bank statements" in t

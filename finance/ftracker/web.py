@@ -348,6 +348,10 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/wealth/include":
+                shown = [int(x) for x in multi.get("shown", []) if x.isdigit()]
+                balances.set_in_wealth(conn, shown, {a for a in shown if form.get(f"inc_{a}") == "1"})
+                return self._redirect("/wealth", "Saved. Net worth now counts only the accounts you ticked.")
             if path == "/setting/reimbursed":
                 summary.set_include_reimbursed(conn, form.get("on") == "1")
                 return self._redirect(form.get("next") if form.get("next") in ("/", "/spending") else "/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
@@ -417,7 +421,7 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
         try:
             if firstrun.needed(c, appmode.app_dir()):
                 firstrun.run(c, home, appmode.app_dir())
-            firstrun.repair(c, appmode.app_dir())
+            firstrun.repair(c, appmode.app_dir(), home)
         except Exception:
             import traceback
             print(traceback.format_exc())

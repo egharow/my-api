@@ -34,7 +34,7 @@ def set_balance_for(conn: sqlite3.Connection, account_id: int, amount: float, as
 def latest(conn: sqlite3.Connection, as_of: str | None = None):
     as_of = as_of or date.today().isoformat()
     return conn.execute(
-        """SELECT a.id AS account_id, a.label, a.kind, a.currency AS account_currency, o.name AS owner,
+        """SELECT a.id AS account_id, a.label, a.kind, a.currency AS account_currency, a.in_wealth, o.name AS owner,
                   b.as_of, b.amount, b.currency
            FROM accounts a LEFT JOIN owners o ON o.id = a.owner_id
            JOIN balances b ON b.id = (SELECT id FROM balances WHERE account_id = a.id AND as_of <= ?
@@ -42,12 +42,22 @@ def latest(conn: sqlite3.Connection, as_of: str | None = None):
            WHERE a.active = 1 AND a.kind != 'card' ORDER BY a.kind, a.label""", (as_of,)).fetchall()
 
 
+def set_in_wealth(conn: sqlite3.Connection, shown_ids: list[int], included_ids: set[int]) -> None:
+    for aid in shown_ids:
+        conn.execute("UPDATE accounts SET in_wealth = ? WHERE id = ?", (1 if aid in included_ids else 0, aid))
+    audit(conn, "set_in_wealth", "account", None, f"{len(included_ids)} of {len(shown_ids)} counted")
+    conn.commit()
+
+
 def net_worth(conn: sqlite3.Connection, as_of: str | None = None, in_currency: str = "ILS",
-              owner: str | None = None) -> dict:
+              owner: str | None = None, everything: bool = False) -> dict:
+    """Accounts you switched off on the Wealth page are left out unless everything=True."""
     as_of = as_of or date.today().isoformat()
     total, lines = 0.0, []
     for r in latest(conn, as_of):
         if owner and r["owner"] != owner:
+            continue
+        if not everything and not r["in_wealth"]:
             continue
         value = fx.convert_asset(conn, r["amount"], r["currency"], in_currency, as_of)
         total += value
