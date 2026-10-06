@@ -36,12 +36,13 @@ def venv_python(windowed: bool = False) -> Path:
     return VENV / "bin" / "python"
 
 
+# The app itself is not "installed": it runs straight from the app folder. Only these packages are installed.
+DEPS = ["openpyxl>=3.1", "xlrd>=2.0.1", "pdfplumber>=0.11"]
+
+
 def deps_hash() -> str:
     import hashlib
-    try:
-        return hashlib.sha256((PROGRAM / "pyproject.toml").read_bytes()).hexdigest()
-    except OSError:
-        return ""
+    return hashlib.sha256("\n".join(DEPS).encode()).hexdigest()
 
 
 def ready() -> bool:
@@ -54,7 +55,7 @@ def ready() -> bool:
     except OSError:
         return False
     result = subprocess.run([str(py), "-c", "import ftracker, openpyxl, xlrd, pdfplumber"],
-                            capture_output=True, creationflags=NO_WINDOW)
+                            capture_output=True, creationflags=NO_WINDOW, cwd=str(PROGRAM))
     return result.returncode == 0
 
 
@@ -153,7 +154,11 @@ def set_up(log) -> None:
         run([base_python(), "-m", "venv", str(VENV)], log)
     log("Step 2 of 3: installing the app. This is the slow part; text keeps moving while it works...")
     run([str(venv_python()), "-m", "pip", "install", "--upgrade", "pip"], log)
-    run([str(venv_python()), "-m", "pip", "install", "-e", str(PROGRAM)], log)
+    if not (PROGRAM / "ftracker" / "__init__.py").exists():
+        found = ", ".join(sorted(p.name for p in PROGRAM.iterdir())[:20]) if PROGRAM.exists() else "(folder missing)"
+        raise SetupFailed(f"The app files are not where they should be: {PROGRAM}\\ftracker is missing. That folder holds: {found}. "
+                          "Please extract FinanceApp.zip again into a new, empty folder and double-click Finance.pyw there.")
+    run([str(venv_python()), "-m", "pip", "install", *DEPS], log)
     log("Step 3 of 3: checking the install...")
     DEPS_STAMP.write_text(deps_hash())
     if not ready():
