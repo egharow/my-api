@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_setup
+from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home
@@ -127,6 +127,10 @@ class App:
             return _html(200, views.item(conn, ctx, int(path[6:])))
         if path == "/imports":
             return _html(200, views.imports(conn, ctx))
+        if path == "/networth":
+            return _html(200, views_trends.networth_page(conn, ctx, q))
+        if path == "/trends":
+            return _html(200, views_trends.trends_page(conn, ctx, q))
         if path == "/balances":
             return _html(200, views.balances_page(conn, ctx))
         if path == "/goals":
@@ -332,7 +336,7 @@ class App:
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
             if path == "/setting/reimbursed":
                 summary.set_include_reimbursed(conn, form.get("on") == "1")
-                return self._redirect("/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
+                return self._redirect(form.get("next") if form.get("next") in ("/", "/trends") else "/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
             if path == "/fx/refresh":
                 res = fx.refresh_current(conn, self._today(), force=True)
                 if res["status"] == "failed":

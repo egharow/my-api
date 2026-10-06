@@ -77,7 +77,7 @@ document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.related
 """
 
 NAV = [("/", "Dashboard"), ("/review", "Review"), ("/items", "Needs attention"), ("/imports", "Imports"),
-       ("/balances", "Balances"), ("/goals", "Goals"), ("/sheet", "Google Sheet"), ("/setup", "Setup")]
+       ("/networth", "Net worth"), ("/trends", "Trends"), ("/balances", "Balances"), ("/goals", "Goals"), ("/sheet", "Google Sheet"), ("/setup", "Setup")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:

@@ -38,7 +38,8 @@ def text(res):
     return res.body.decode("utf-8")
 
 
-@pytest.mark.parametrize("path", ["/", "/review", "/items", "/items?status=all", "/imports", "/balances", "/goals", "/?cur=USD&owner=Ely"])
+@pytest.mark.parametrize("path", ["/", "/review", "/items", "/items?status=all", "/imports", "/balances", "/goals", "/?cur=USD&owner=Ely",
+                                  "/networth", "/networth?cur=USD&owner=Ely", "/trends", "/trends?range=6&owner=Shir", "/trends?cat=Groceries"])
 def test_every_page_renders(app, path):
     res = get(app, path)
     assert res.status == 200 and "<title>" in text(res)
