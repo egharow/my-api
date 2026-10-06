@@ -76,6 +76,9 @@ class App:
             if not (cookies.get("auth") and hmac.compare_digest(cookies["auth"].value, self._auth_token())):
                 return _html(401, self._login_page())
 
+        if path == "/health":      # for the launcher: is the app up, and has a window actually loaded it?
+            seen = bool(self.watchdog and self.watchdog.last_ping is not None)
+            return self._json(200, {"app": appmode.APP_ID, "ok": True, "page_seen": seen})
         if path == "/ping":
             if self.watchdog:
                 self.watchdog.ping(self.clock())
@@ -354,6 +357,17 @@ class App:
 
 def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = None, open_browser: bool = True,
           app_mode: bool = False) -> None:
+    try:
+        _serve(home, port, lan, pin, open_browser, app_mode)
+    except Exception:
+        import traceback
+        print(traceback.format_exc())            # in app mode this lands in app-log.txt
+        if sys.stdout is not sys.__stdout__ and sys.__stderr__:
+            traceback.print_exc(file=sys.__stderr__)
+        raise
+
+
+def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool, app_mode: bool) -> None:
     home.ensure()
     log = None
     if app_mode:

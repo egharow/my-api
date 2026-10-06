@@ -42,10 +42,61 @@ def ready() -> bool:
     return result.returncode == 0
 
 
-def start_app() -> None:
-    """Start the app detached from this launcher, so closing the launcher does not stop it."""
-    subprocess.Popen([str(venv_python(windowed=True)), "-m", "ftracker", "app"], cwd=str(APP), creationflags=DETACHED | NO_WINDOW,
-                     close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+START_LOG = APP / "app-start-log.txt"
+PORTS = range(8765, 8795)
+
+
+def start_app() -> subprocess.Popen:
+    """Start the app detached from this launcher. Its messages go to app-start-log.txt, so a failure is never silent."""
+    out = open(START_LOG, "w", encoding="utf-8")
+    return subprocess.Popen([str(venv_python()), "-m", "ftracker", "app"], cwd=str(APP), creationflags=DETACHED | NO_WINDOW,
+                            close_fds=True, stdin=subprocess.DEVNULL, stdout=out, stderr=out)
+
+
+def health() -> dict | None:
+    import json
+    import urllib.request
+    for port in PORTS:
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as resp:
+                data = json.loads(resp.read().decode())
+                if data.get("app") == "finance-tracker":
+                    return {**data, "port": port}
+        except Exception:
+            continue
+    return None
+
+
+def tail(path: Path, n: int = 25) -> str:
+    try:
+        return "\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-n:])
+    except OSError:
+        return ""
+
+
+def launch() -> None:
+    """Start the app and make sure you actually see it: report a crash, and fall back to the normal browser."""
+    import webbrowser
+    proc = start_app()
+    deadline = time.time() + 150            # the very first start loads your history, which takes a little while
+    up = None
+    while time.time() < deadline:
+        up = health()
+        if up or proc.poll() is not None:
+            break
+        time.sleep(1)
+    if not up:
+        up = health()
+    if not up:
+        details = tail(START_LOG) or tail(APP / "launcher-log.txt")
+        alert("Finance Tracker did not start",
+              f"The app did not come up.\n\n{details}\n\nThe full text is in:\n{START_LOG}\nPlease send me that file.")
+        return
+    for _ in range(20):                     # up, but did a window load it?
+        if (health() or {}).get("page_seen"):
+            return
+        time.sleep(1)
+    webbrowser.open(f"http://localhost:{up['port']}/")
 
 
 def base_python() -> str:
@@ -111,7 +162,7 @@ def setup_with_window() -> None:
         # No window toolkit: do the same work quietly, then report only if it fails.
         try:
             set_up(log)
-            start_app()
+            launch()
         except Exception as exc:
             alert("Finance Tracker could not set itself up", f"{exc}\n\nDetails were saved in:\n{LOG}")
         return
@@ -140,7 +191,7 @@ def setup_with_window() -> None:
                 status.configure(text="Something went wrong. The text above says what. Details were saved to launcher-log.txt.")
                 tk.Button(root, text="Copy the details", command=lambda: (root.clipboard_clear(), root.clipboard_append("\n".join(lines)))).pack(pady=(0, 10))
             else:
-                status.configure(text="Done. The app is opening.")
+                status.configure(text="Done. The app is open.")
                 root.after(1200, root.destroy)
             return
         root.after(150, pump)
@@ -148,7 +199,8 @@ def setup_with_window() -> None:
     def worker() -> None:
         try:
             set_up(log)
-            start_app()
+            log("Starting the app. The very first start loads your history, which can take a minute...")
+            launch()
         except Exception as exc:
             log(str(exc) if isinstance(exc, SetupFailed) else traceback.format_exc())
             outcome["error"] = True
@@ -161,7 +213,7 @@ def setup_with_window() -> None:
 
 def main() -> None:
     if ready():
-        start_app()
+        launch()
         return
     # Only one setup at a time (a second double-click while it runs would fight the first).
     if LOCK.exists() and time.time() - LOCK.stat().st_mtime < 900:
