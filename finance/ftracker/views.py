@@ -439,9 +439,9 @@ def goals_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                   f'<p class="muted">Goals by age need a birth date: {birth}</p></div>')
 
 
-def sheet_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
+def sheet_body(conn: sqlite3.Connection, ctx: Ctx, back: str = "/sheet") -> str:
     st = sheetsync.status(conn)
-    head = ("<h1>Google Sheet</h1>"
+    head = ("" 
             + (f'<div class="card"><h2>Linked <span class="chip good"><b>✔</b> on</span></h2><p>Last updated: <b>{esc((st["last_sync"] or "never").replace("T", " "))}</b>. '
                f'It updates by itself every time you submit an import.</p><p class="muted">{esc(st["last_result"] or "")}</p>'
                + _form(ctx, "/sheet/sync", "<button>Update it now</button>", "inline") + " "
@@ -467,4 +467,12 @@ def sheet_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
              + _form(ctx, "/sheet/link", '<input name="url" style="width:100%;max-width:560px" placeholder="https://script.google.com/macros/s/…/exec" required> <button>Link and test</button>', "row")
              + '<p class="muted">The script contains a secret that only this app knows. Anyone with the address still cannot change your sheet without it.</p>'
              f'<textarea id="scr" readonly rows="8" style="width:100%;font:12px monospace" onclick="this.select()">{script}</textarea></div>')
-    return layout(conn, ctx, "/sheet", "Google Sheet", head + steps)
+    html = head + steps
+    if back == "/sheet":
+        return html
+    token = f'<input type="hidden" name="csrf" value="{esc(ctx.csrf)}">'
+    return html.replace(token, token + f'<input type="hidden" name="back" value="{esc(back)}">')
+
+
+def sheet_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    return layout(conn, ctx, "/sheet", "Google Sheet", "<h1>Google Sheet</h1>" + sheet_body(conn, ctx))

@@ -75,6 +75,8 @@ def expected_files(conn: sqlite3.Connection, today: str) -> list[dict]:
 EXTRA_SOURCES = [
     {"name": "Shir's Isracard", "kind": "card", "issuer": "isracard", "owner": "Shir", "optional": False},
     {"name": "Member card (Max It)", "kind": "card", "label_contains": "בהצדעה", "optional": True},
+    {"name": "Cal 5962 (new card)", "kind": "card", "last4": "5962", "optional": True,
+     "detail": "make it required once you use it; upload its first export so the app can learn to read it"},
     {"name": "Shir's Leumi account", "kind": "bank", "issuer": "leumi", "owner": "Shir", "optional": True},
 ]
 
@@ -150,6 +152,8 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
                 continue
             if src.get("label_contains") and src["label_contains"] not in a["label"]:
                 continue
+            if src.get("last4") and a["last4"] != src["last4"]:
+                continue
             found = conn.execute("SELECT 1 FROM statements WHERE account_id = ?", (a["id"],)).fetchone() is not None
             if found:
                 break
@@ -157,11 +161,20 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
             continue            # already listed above from its own account
         target = banks if src["kind"] == "bank" else cards
         target.append({"label": src["name"], "status": "optional" if src["optional"] else "todo",
-                       "detail": "nice to have, not required" if src["optional"] else "not uploaded yet"})
+                       "detail": src.get("detail") or ("nice to have, not required" if src["optional"] else "not uploaded yet")})
 
-    due_b, last_b = balances.balances_due(conn, today)
-    other.append({"label": "Balances (every 2 months)", "status": "todo" if due_b else "done",
-                  "detail": f"last updated {last_b}" if last_b else "never entered", "link": "/balances"})
+    pend = balances.pending(conn, today)
+    todo = [p for p in pend if not p["current"]]
+    kids = []
+    for p in pend:
+        l, a = p["latest"], p["account"]
+        who = f"{a['owner']} · " if a["owner"] else ""
+        kids.append({"label": a["label"],
+                     "status": "done" if p["current"] else "todo",
+                     "detail": who + ((f"updated {l['as_of']}" if p["current"] else f"last value {l['as_of']}") if l else "never entered")})
+    other.append({"label": "Balances (monthly)", "status": "todo" if todo else "done",
+                  "detail": (f"{len(todo)} of {len(pend)} accounts need a number" if todo else f"all {len(pend)} accounts are up to date"),
+                  "link": "/balances", "children": kids})
     groups = [{"title": "Card statements", "items": cards}, {"title": "Bank statements", "items": banks},
               {"title": "Numbers you type", "items": other}]
     counted = [i for g in groups for i in g["items"] if i["status"] in ("done", "todo")]

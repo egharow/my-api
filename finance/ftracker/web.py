@@ -268,19 +268,20 @@ class App:
                         balances.set_balance_for(conn, int(key[4:]), amount, form.get("as_of") or self._today())
                         saved += 1
                 return self._redirect("/balances", f"{saved} balance(s) saved")
+            back = form.get("back") if form.get("back") in ("/upload", "/sheet") else "/sheet"
             if path == "/sheet/link":
                 sheetsync.link(conn, form.get("url", ""))
                 res = sheetsync.push(conn, self._today())
-                return self._redirect("/sheet", ("Linked. " if res["ok"] else "Saved, but the first update failed: ") + res["detail"], err=not res["ok"])
+                return self._redirect(back, ("Linked. " if res["ok"] else "Saved, but the first update failed: ") + res["detail"], err=not res["ok"])
             if path == "/sheet/sync":
                 res = sheetsync.push(conn, self._today())
-                return self._redirect("/sheet", ("Updated: " if res["ok"] else "Not updated: ") + res["detail"], err=not res["ok"])
+                return self._redirect(back, ("Updated: " if res["ok"] else "Not updated: ") + res["detail"], err=not res["ok"])
             if path == "/sheet/notes":
                 sheetsync.set_notes(conn, form.get("notes") == "1")
-                return self._redirect("/sheet", "Saved")
+                return self._redirect(back, "Saved")
             if path == "/sheet/unlink":
                 sheetsync.unlink(conn)
-                return self._redirect("/sheet", "Unlinked")
+                return self._redirect(back, "Unlinked")
             if path == "/seed/dismiss":
                 firstrun.dismiss_notice(conn)
                 return self._redirect("/", "")

@@ -111,10 +111,11 @@ def test_unexpected_responses_are_rejected_not_trusted():
             fx.parse_web_rate(body)
 
 
-def test_balances_due_every_two_months_and_stale_accounts(conn):
+def test_balances_due_monthly_and_stale_accounts(conn):
     accounts.add_account(conn, "pension", "x", "Pension")
     assert balances.balances_due(conn, "2026-10-05") == (True, None)
-    balances.set_balance(conn, "Pension", 5, "2026-08-20")
-    assert balances.balances_due(conn, "2026-10-05")[0] is False
-    assert balances.balances_due(conn, "2026-11-05")[0] is True
-    assert [r["label"] for r in balances.stale(conn, "2026-11-05")] == ["Pension"]
+    balances.set_balance(conn, "Pension", 5, "2026-10-01")
+    assert balances.balances_due(conn, "2026-10-20")[0] is False
+    assert balances.balances_due(conn, "2026-11-10")[0] is True
+    assert [r["label"] for r in balances.stale(conn, "2026-11-10")] == ["Pension"]
+    assert [p["current"] for p in balances.pending(conn, "2026-11-10")] == [False]

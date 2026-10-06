@@ -6,8 +6,8 @@ from . import fx
 from .accounts import find_account
 from .db import audit, now
 
-DUE_DAYS = 62      # about two months
-STALE_DAYS = 60
+DUE_DAYS = 35      # a balance is due about once a month
+STALE_DAYS = 35
 ASSET_KINDS = ("bank", "investment", "pension", "savings", "real_estate", "loan", "other")
 
 
@@ -70,3 +70,16 @@ def balances_due(conn: sqlite3.Connection, today: str) -> tuple[bool, str | None
     if last is None:
         return True, None
     return (date.fromisoformat(today) - date.fromisoformat(last)).days > DUE_DAYS, last
+
+
+def pending(conn: sqlite3.Connection, today: str, days: int = STALE_DAYS):
+    """Every account that needs a typed balance, with its latest value (or None): the monthly to-do list."""
+    cutoff = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
+    latest_by = {r["account_id"]: r for r in latest(conn, today)}
+    out = []
+    for a in conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
+                             LEFT JOIN owners o ON o.id = a.owner_id
+                             WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' ORDER BY o.name, a.kind, a.label"""):
+        l = latest_by.get(a["id"])
+        out.append({"account": a, "latest": l, "current": bool(l and l["as_of"] >= cutoff)})
+    return out

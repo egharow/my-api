@@ -170,3 +170,10 @@ def test_import_button_reports_empty_and_recognised(app, home, monkeypatch):
     assert "inbox is empty" in _flash(post(app, "/import", {}))
     (home.inbox / "junk.xlsx").write_bytes(b"nope")
     assert "not recognised" in _flash(post(app, "/import", {}))
+
+
+def test_upload_page_lists_cal_card_expandable_balances_and_sheet_link(app):
+    u = text(get(app, "/upload"))
+    assert "Cal 5962" in u
+    assert "Balances (monthly)" in u and "show which" in u
+    assert "Google Sheet (optional)" in u and 'name="back" value="/upload"' in u

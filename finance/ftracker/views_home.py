@@ -20,8 +20,14 @@ def render_checklist(cl: dict) -> str:
         for i in g["items"]:
             icon, tone, word = MARK[i["status"]]
             name = f'<a href="{esc(i["link"])}">{esc(i["label"])}</a>' if i.get("link") and i["status"] == "todo" else esc(i["label"])
+            detail = f'{esc(word)} · {esc(i["detail"])}'
+            if i.get("children"):
+                inner = "".join(
+                    f'<div class="row" style="padding:2px 0"><span class="chip {MARK[k["status"]][1]}"><b aria-hidden="true">{MARK[k["status"]][0]}</b></span>'
+                    f'<span dir="auto">{esc(k["label"])}</span><span class="muted">{esc(k["detail"])}</span></div>' for k in i["children"])
+                detail = (f'<details{" open" if i["status"] == "todo" else ""}><summary>{detail} · show which</summary>{inner}</details>')
             rows.append(f'<tr><td style="width:2em"><span class="chip {tone}"><b aria-hidden="true">{icon}</b></span></td>'
-                        f'<td dir="auto">{name}</td><td class="muted">{esc(word)} · {esc(i["detail"])}</td></tr>')
+                        f'<td dir="auto">{name}</td><td class="muted">{detail}</td></tr>')
         out.append(f'<h2 style="margin-top:12px">{esc(g["title"])}</h2><table><tbody>{"".join(rows)}</tbody></table>')
     return "".join(out)
 
@@ -37,18 +43,19 @@ def home(conn: sqlite3.Connection, ctx: Ctx) -> str:
     from . import firstrun, sheetsync
     c = counts(conn)
     cl = expected.checklist(conn, ctx.today)
-    due_b, last_b = balances.balances_due(conn, ctx.today)
+    bal = [i for g in cl["groups"] for i in g["items"] if i.get("children")]
+    due_b = bool(bal) and bal[0]["status"] == "todo"
+    bal_detail = bal[0]["detail"] if bal else ""
     drafts = conn.execute("SELECT COUNT(*) FROM batches WHERE status != 'committed'").fetchone()[0]
-    missing = cl["total"] - cl["done"]
+    missing = sum(1 for g in cl["groups"] for i in g["items"] if i["status"] == "todo" and not i.get("children"))
     steps = "".join([
         _step(1, "Upload your statements", "done" if not missing else "todo",
-              f"{cl['done']} of {cl['total']} on the checklist received", "/upload", "Open the checklist"),
+              f"{missing} statement(s) still to upload" if missing else "all statements received", "/upload", "Open the checklist"),
         _step(2, "Confirm categories", "done" if not c["review"] else "todo",
               "nothing to confirm" if not c["review"] else f"{c['review']} merchants to confirm", "/review", "Review"),
         _step(3, "Check for problems", "done" if not c["items"] else "todo",
               "all clear" if not c["items"] else f"{c['items']} to look at", "/items", "See them"),
-        _step(4, "Update balances (every 2 months)", "todo" if due_b else "done",
-              f"last updated {last_b}" if last_b else "never entered", "/balances", "Enter balances"),
+        _step(4, "Update balances (monthly)", "todo" if due_b else "done", bal_detail, "/balances", "Enter balances"),
         _step(5, "Submit", "todo" if drafts else "done",
               f"{drafts} import(s) not submitted yet" if drafts else "everything is recorded", "/imports", "Submit"),
     ])
@@ -87,8 +94,10 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
             f'<p class="muted">{cl["done"]} of {cl["total"]} received. Drop a file and its box is ticked automatically.</p>')
     nxt = (f'<p><a href="/review"><button>Next: confirm {c["review"]} categories</button></a></p>' if c["review"] else
            '<p><a href="/"><button class="quiet">Back to this round</button></a></p>')
+    from .views import sheet_body
     body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}<section class="card">{head}{render_checklist(cl)}</section>'
-            f'<div style="margin-top:12px">{nxt}</div>')
+            f'<div style="margin-top:12px">{nxt}</div>'
+            f'<section style="margin-top:24px"><h2>Google Sheet (optional)</h2>{sheet_body(conn, ctx, "/upload")}</section>')
     return layout(conn, ctx, "/upload", "Upload", body)
 
 
