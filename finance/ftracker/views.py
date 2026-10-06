@@ -215,11 +215,20 @@ def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     rows = sorted(grouped.items(), key=lambda kv: -kv[1])
     detail = {k: ", ".join(f'{r["subcategory"]} {r["spent"]:,.0f}' for r in cats if r["category"] == k) for k in grouped}
     bars = charts.hbars([(k, v, f"{k}: {detail[k]}") for k, v in rows[:14]])
+    reimb = summary.reimbursed_total(conn, chosen, owner) if chosen else 0
+    inc_r = summary.include_reimbursed(conn)
+    reimb_html = ""
+    if reimb or inc_r:
+        reimb_html = _form(ctx, "/setting/reimbursed",
+                           f'<span>Vituri (paid back in cash): {esc(money(reimb))} this month, '
+                           f'{"counted in" if inc_r else "not counted in"} spending.</span>'
+                           f'<input type="hidden" name="on" value="{0 if inc_r else 1}">'
+                           f'<button>{"Leave out" if inc_r else "Include"}</button>', "row")
     ctable = charts.data_table(["Category", "Spent"], [[k, f"{v:,.2f}"] for k, v in rows], f"Spending by category, {chosen}")
     out.append(f'<section class="card" style="margin-top:16px"><h2>Where the money went</h2>'
                f'<form method="get" class="row"><select name="month" onchange="this.form.submit()">{month_opts}</select>'
                f'<select name="owner" onchange="this.form.submit()">{owner_opts}</select><input type="hidden" name="cur" value="{cur}"></form>'
-               f"{bars}{ctable}</section>")
+               f"{reimb_html}{bars}{ctable}</section>")
 
     if gp:
         cards = "".join(_goal_card(g) for g in gp[:4])

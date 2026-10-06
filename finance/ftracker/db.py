@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Version 1 is schema.sql as first released. Later changes are migrations, applied in order,
 # so a database made by an earlier build is upgraded in place and keeps its data.
-MIGRATIONS = [(2, "002_monthly_entries.sql"), (3, "003_goals.sql"), (4, "004_member_card.sql"), (5, "005_drop_card_rates.sql")]
+MIGRATIONS = [(2, "002_monthly_entries.sql"), (3, "003_goals.sql"), (4, "004_member_card.sql"), (5, "005_drop_card_rates.sql"), (6, "006_reimbursed.sql")]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

@@ -114,14 +114,14 @@ def test_save_keeps_your_categories_applies_your_rules_and_is_repeatable(conn, s
     accounts.add_owner(conn, "Ely"); accounts.add_owner(conn, "Shir")
     data = sheet_import.parse_workbook(sheet)
     res = sheet_import.save(conn, data)
-    assert res["transactions"] == 10 and res["transfers_reclassified"] == 1
+    assert res["transactions"] == 10 and res["transfers_reclassified"] == 0       # the Bit line has your own category, so it stays
     rows = {r["description"]: r for r in conn.execute(
         "SELECT t.*, c.name AS cat FROM transactions t JOIN categories c ON c.id = t.category_id")}
     assert (rows["SUPER EXAMPLE 12"]["cat"], rows["SUPER EXAMPLE 12"]["category_status"]) == ("Groceries", "approved")
     assert rows["SUPER EXAMPLE 12"]["amount"] == -100.0 and rows["SUPER EXAMPLE 12"]["budget_month"] == "2025-03"
     assert rows["STORE REFUND"]["amount"] == 18.9 and rows["STORE REFUND"]["kind"] == "refund"
     bit = rows["בנהפ BIT העברה ב"]
-    assert (bit["cat"], bit["kind"]) == ("Transfer to household", "transfer")      # not "Eating out"
+    assert (bit["cat"], bit["kind"]) == ("Eating out", "purchase")                 # you categorised it, so your choice wins
     assert rows["MYSTERY"]["category_status"] == "proposed" and rows["MYSTERY"]["cat"] == "Uncategorised"
     assert rows["NEW CATEGORY"]["cat"] == "Vituri"                                 # unmapped kept, not lost
     again = sheet_import.save(conn, data)

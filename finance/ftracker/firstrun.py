@@ -102,3 +102,19 @@ def pending_notice(conn: sqlite3.Connection) -> list[str] | None:
 def dismiss_notice(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM settings WHERE key = ?", (SUMMARY_KEY,))
     conn.commit()
+
+
+REPAIR_KEY = "repair_old_sheet_categories_v2"
+
+
+def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
+    """One-time: restore categories you set in the old sheet that an earlier build overrode (Bit lines, Investment)."""
+    if conn.execute("SELECT 1 FROM settings WHERE key = ?", (REPAIR_KEY,)).fetchone():
+        return 0
+    history = seed_dir(app_dir) / "history.xlsx"
+    fixed = 0
+    if history.exists():
+        fixed = sheet_import.restore_categories(conn, sheet_import.parse_workbook(history))
+    _set(conn, REPAIR_KEY, str(fixed))
+    conn.commit()
+    return fixed

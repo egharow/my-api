@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, uploads, views, views_setup
+from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_setup
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home
@@ -306,6 +306,12 @@ class App:
                     dest = conn.execute("SELECT label FROM accounts WHERE id = ?", (int(form["destination"]),)).fetchone()[0]
                 categorize.add_rule_from_form(conn, form["pattern"], form.get("category", ""), form.get("mode", "spend"), dest)
                 return self._redirect("/setup", "Rule saved")
+            if path == "/setup/category/merge":
+                res = categorize.merge_category(conn, form["src"], form["dst"])
+                return self._redirect("/setup", f"“{form['src']}” merged into “{form['dst']}”: {res['lines']} lines moved")
+            if path == "/setup/category/rename":
+                categorize.rename_category(conn, form["old"], form.get("new", ""))
+                return self._redirect("/setup", f"Renamed to “{form['new'].strip()}”")
             if path == "/setup/rule/toggle":
                 categorize.toggle_rule(conn, int(form["id"]))
                 return self._redirect("/setup", "Saved")
@@ -321,6 +327,9 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/setting/reimbursed":
+                summary.set_include_reimbursed(conn, form.get("on") == "1")
+                return self._redirect("/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
             if path == "/fx/refresh":
                 res = fx.refresh_current(conn, self._today(), force=True)
                 if res["status"] == "failed":
@@ -361,6 +370,7 @@ def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = Non
     try:                                              # load what you already gave me, once, before the window opens
         if firstrun.needed(conn, appmode.app_dir()):
             firstrun.run(conn, home, appmode.app_dir())
+        firstrun.repair(conn, appmode.app_dir())
     except Exception:
         import traceback
         print(traceback.format_exc())

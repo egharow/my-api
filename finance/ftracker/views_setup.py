@@ -167,6 +167,16 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                + f"<details style='margin-top:12px'><summary>Learned from your history and approvals ({len(by['learned'])})</summary>{rule_rows(by['learned'], 200)}</details>"
                + f"<details style='margin-top:8px'><summary>Built in ({len(by['builtin'])})</summary>{rule_rows(by['builtin'])}</details></section>")
 
+    cc = categorize.category_counts(conn)
+    cat_rows = "".join(f'<tr><td dir="auto">{esc(c["name"])}</td><td>{esc(c["kind"])}</td><td class="n">{c["lines"]}</td></tr>' for c in cc)
+    pick = lambda name, skip=False: (f'<select name="{name}" required>' + "".join(
+        f'<option>{esc(c["name"])}</option>' for c in cc if not (skip and c["name"] == "Uncategorised")) + "</select>")
+    out.append('<section class="card" style="margin-top:12px"><h2>Categories</h2><p class="muted">Merge a category into another (all its lines and rules move), '
+               'or rename one. Use this to tidy names from your old sheet.</p>'
+               + _form(ctx, "/setup/category/merge", f"Merge {pick('src', True)} into {pick('dst')} <button>Merge</button>", "row")
+               + _form(ctx, "/setup/category/rename", f"Rename {pick('old', True)} to <input name='new' placeholder='new name' required> <button class=quiet>Rename</button>", "row")
+               + f'<details style="margin-top:12px"><summary>All categories ({len(cc)})</summary>'
+               + charts.scroll(f'<table><thead><tr><th>Category</th><th>Type</th><th class="n">Lines</th></tr></thead><tbody>{cat_rows}</tbody></table>') + "</details></section>")
     shortcut = (_form(ctx, "/setup/shortcut", "<button>Put an icon on my desktop</button>", "inline") if ctx.can_shortcut else "")
     out.append('<section class="card" style="margin-top:12px"><h2>This app</h2>'
                f'<p>Your data lives in <code>{esc(ctx.data_root)}</code> on this computer. Statements you drop in are filed under <code>archive</code> there, and a backup is made before every import.</p>'

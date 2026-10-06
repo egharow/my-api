@@ -229,3 +229,51 @@ def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
         raise PermissionError("built-in rules can be switched off but not deleted")
     conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
     conn.commit()
+
+
+def category_counts(conn: sqlite3.Connection):
+    return conn.execute(
+        """SELECT c.id, c.name, c.kind, COUNT(t.id) AS lines FROM categories c
+           LEFT JOIN transactions t ON t.category_id = c.id GROUP BY c.id ORDER BY lines DESC, c.name""").fetchall()
+
+
+def merge_category(conn: sqlite3.Connection, src: str, dst: str) -> dict:
+    """Move every line and rule from one category into another. A category you created is removed afterwards."""
+    from .seed import CATEGORIES
+    if src == dst:
+        raise ValueError("choose two different categories")
+    if src == "Uncategorised":
+        raise ValueError("Uncategorised is where unreviewed lines wait; it cannot be merged away")
+    a = conn.execute("SELECT id FROM categories WHERE name = ?", (src,)).fetchone()
+    b = conn.execute("SELECT id FROM categories WHERE name = ?", (dst,)).fetchone()
+    if not a or not b:
+        raise ValueError("unknown category")
+    locked = conn.execute(
+        """SELECT COUNT(*) FROM transactions t JOIN batches x ON x.id = t.batch_id
+           WHERE t.category_id = ? AND x.status = 'committed'""", (a["id"],)).fetchone()[0]
+    if locked:
+        raise PermissionError(f"{locked} line(s) of “{src}” are in a submitted import; reopen it first")
+    moved = conn.execute("UPDATE transactions SET category_id = ? WHERE category_id = ?", (b["id"], a["id"])).rowcount
+    rules = conn.execute("UPDATE rules SET category_id = ? WHERE category_id = ?", (b["id"], a["id"])).rowcount
+    removed = False
+    if src not in {c[0] for c in CATEGORIES}:
+        conn.execute("UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (a["id"],))
+        conn.execute("DELETE FROM categories WHERE id = ?", (a["id"],))
+        removed = True
+    audit(conn, "merge_category", "category", b["id"], f"{src} -> {dst}: {moved} lines, {rules} rules")
+    conn.commit()
+    return {"lines": moved, "rules": rules, "removed": removed}
+
+
+def rename_category(conn: sqlite3.Connection, old: str, new: str) -> None:
+    new = new.strip()
+    if not new:
+        raise ValueError("type the new name")
+    if old == "Uncategorised":
+        raise ValueError("Uncategorised cannot be renamed")
+    if conn.execute("SELECT 1 FROM categories WHERE name = ?", (new,)).fetchone():
+        raise ValueError(f"there is already a category called “{new}”; merge into it instead")
+    if not conn.execute("UPDATE categories SET name = ? WHERE name = ?", (new, old)).rowcount:
+        raise ValueError("unknown category")
+    audit(conn, "rename_category", "category", None, f"{old} -> {new}")
+    conn.commit()

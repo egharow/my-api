@@ -7,10 +7,35 @@ def _committed(alias: str, committed_only: bool) -> str:
     return (f" AND {alias}.batch_id IN (SELECT id FROM batches WHERE status = 'committed')" if committed_only else "")
 
 
+def include_reimbursed(conn: sqlite3.Connection) -> bool:
+    row = conn.execute("SELECT value FROM settings WHERE key = 'include_reimbursed'").fetchone()
+    return bool(row) and row[0] == "1"
+
+
+def set_include_reimbursed(conn: sqlite3.Connection, on: bool) -> None:
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('include_reimbursed', ?)", ("1" if on else "0",))
+    conn.commit()
+
+
+def reimbursed_total(conn: sqlite3.Connection, month: str, owner: str | None = None, committed_only: bool = False) -> float:
+    args: list = [month]
+    extra = ""
+    if owner:
+        extra = " AND o.name = ?"
+        args.append(owner)
+    return conn.execute(
+        f"""SELECT ROUND(COALESCE(SUM(-t.amount),0),2) FROM transactions t JOIN categories c ON c.id = t.category_id
+            JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
+            WHERE c.reimbursed = 1 AND t.budget_month = ? AND t.currency = 'ILS'{extra}{_committed('t', committed_only)}""",
+        args).fetchone()[0]
+
+
 def spending_by_category(conn: sqlite3.Connection, month: str | None = None, owner: str | None = None,
                          start: str | None = None, end: str | None = None, committed_only: bool = False):
     where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'"]
     args: list = []
+    if not include_reimbursed(conn):
+        where.append("c.reimbursed = 0")
     if month:
         where.append("t.budget_month = ?")
         args.append(month)

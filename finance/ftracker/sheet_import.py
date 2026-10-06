@@ -31,6 +31,7 @@ CATEGORY_MAP = {
     "Phone": "Phone", "Electric Bill": "Utilities", "Gas": "Utilities", "Water Bill": "Utilities",
     "Education": "Education", "Insurance": "Insurance", "Arnona": "Property tax",
     "Vaad Bait": "Building committee", "Donations": "Donations",
+    "Investment": "Transfer to savings",       # money moved into investments is not spending
 }
 LEARN_MIN_COUNT = 2
 LEARN_MIN_SHARE = 0.9
@@ -363,9 +364,9 @@ def save(conn: sqlite3.Connection, data: HistoryData, primary_owner: str = "Ely"
             seen[sig] += 1
             cat_name = mapping.get(l.category, l.category) if l.category else None
             special = categorize.find_rule(conn, norm, -l.amount, "card")
-            if special and special["source"] == "builtin" and special["set_kind"] in ("transfer", "card_payment"):
-                cat_name = None      # your rule wins over the old label: Bit moves money, it is not spending
-                overridden += 1
+            if (cat_name is None and special and special["source"] == "builtin"
+                    and special["set_kind"] in ("transfer", "card_payment")):
+                overridden += 1      # only for lines you left blank: Bit usually moves money, it is not spending
             try:
                 cur = conn.execute(
                     """INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description,
@@ -467,3 +468,34 @@ def learn_rules(conn: sqlite3.Connection) -> int:
         categorize.add_learned_rule(conn, key, name)
         created += 0 if before else 1
     return created
+
+
+def restore_categories(conn: sqlite3.Connection, data: HistoryData, extra_map: dict[str, str] | None = None) -> int:
+    """Put your own categories back on imported lines that an earlier version changed.
+
+    Only lines in imports that are not submitted yet, and not ones you have since edited, are touched.
+    """
+    mapping = {**CATEGORY_MAP, **(extra_map or {})}
+    fixed = 0
+    for m in data.months:
+        seen: Counter = Counter()
+        for l in m.log:
+            norm = norm_description(l.description)
+            sig = (l.day, round(l.amount, 2), norm)
+            key = f"sheet|{m.month}|{l.day}|{l.amount:.2f}|{norm}|{seen[sig]}"
+            seen[sig] += 1
+            if not l.category:
+                continue
+            want = mapping.get(l.category, l.category)
+            row = conn.execute(
+                """SELECT t.id, c.name AS cat, t.proposal_basis, b.status FROM transactions t
+                   JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
+                   WHERE t.dedupe_key = ?""", (key,)).fetchone()
+            if not row or row["cat"] == want or row["status"] == "committed" or row["proposal_basis"] == "approved by you":
+                continue
+            conn.execute(
+                """UPDATE transactions SET category_id = ?, category_status = 'approved', confidence = 1.0,
+                          proposal_basis = 'from your old sheet', kind = ? WHERE id = ?""",
+                (_category_id(conn, want), "refund" if l.amount < 0 else "purchase", row["id"]))
+            fixed += 1
+    return fixed
