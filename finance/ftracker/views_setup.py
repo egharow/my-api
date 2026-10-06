@@ -107,7 +107,9 @@ def history_preview_page(conn: sqlite3.Connection, ctx: Ctx, data: "sheet_import
 # ---- setup --------------------------------------------------------------------------------------
 
 def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
-    out = ["<h1>Setup</h1>"]
+    out = ["<h1>Settings</h1>",
+           '<div class="card" style="margin-bottom:12px"><div class="row"><a href="/items">Problems to check</a> · <a href="/imports">Imports and submit history</a> · '
+           '<a href="/balances">Balances and dollar rate</a> · <a href="/goals">Goals</a> · <a href="/sheet">Google Sheet (optional)</a></div></div>']
     if ctx.starter:
         out.append('<div class="banner"><b>Your starter setup is ready.</b> It adds the people, accounts and income rules prepared for you. '
                    + _form(ctx, "/setup/starter", "<button>Apply it</button>", "inline") + "</div>")

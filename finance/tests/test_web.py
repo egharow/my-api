@@ -45,12 +45,23 @@ def test_every_page_renders(app, path):
     assert res.status == 200 and "<title>" in text(res)
 
 
-def test_dashboard_shows_the_numbers_and_flags_drafts_and_missing_files(app):
-    t = text(get(app, "/"))
-    assert "Net worth" in t and "Income and spending" in t and "Where the money went" in t
-    assert "drafts" in t                                          # nothing is submitted yet
+def test_spending_and_wealth_show_the_numbers(app):
+    t = text(get(app, "/spending"))
+    assert "Income and spending" in t and "Total spending by month" in t and "Every category, every month" in t
     assert "28,000" in t                                          # March 2025 income from the old sheet
     assert 'data-tip="' in t and "Table view" in t                # tooltips and the table alternative
+    w = text(get(app, "/wealth"))
+    assert "Net worth" in w and "Change between updates" in w and "What it is made of" in w
+
+
+def test_home_walks_through_the_steps_and_upload_ticks_boxes(app):
+    h = text(get(app, "/"))
+    for step in ("Upload your statements", "Confirm categories", "Check for problems", "Update balances", "Submit"):
+        assert step in h
+    u = text(get(app, "/upload"))
+    assert "Card statements" in u and "Bank statements" in u and "Numbers you type" in u
+    assert "Isracard" in u and "Received" in u                    # the statement imported in the fixture is ticked
+    assert "Shir&#x27;s Isracard" in u or "Shir's Isracard" in u   # a source with no file yet is listed as needed
 
 
 def test_statement_text_is_escaped(app):

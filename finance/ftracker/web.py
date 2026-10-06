@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_setup, views_trends
+from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_home, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home
@@ -39,6 +39,12 @@ def _html(status: int, text: str, extra=None) -> Response:
     return Response(status, text.encode("utf-8"), [("Content-Type", "text/html; charset=utf-8")] + (extra or []))
 
 
+LOADING_PAGE = ("<!doctype html><meta charset=utf-8><meta http-equiv=refresh content=2><title>Finance · loading</title>"
+                "<body style='font:16px system-ui;max-width:460px;margin:80px auto;text-align:center'>"
+                "<h2>Loading your data…</h2><p>The first start reads your old sheet and statements. This takes a minute, once.</p>"
+                "<script>fetch('/ping').catch(function(){})</script>")
+
+
 class App:
     def __init__(self, home: Home, pin: str | None = None, lan: bool = False, today: str | None = None,
                  app_dir: Path | None = None, watchdog: "appmode.Watchdog | None" = None, clock=time.time):
@@ -48,6 +54,7 @@ class App:
         self.app_dir = app_dir or appmode.app_dir()
         self.watchdog, self.clock, self.active = watchdog, clock, 0
         self.shutdown = None                      # set by serve(); closes the server
+        self.loading = False                      # True while the starting data is being loaded in the background
 
     def _json(self, status: int, obj: dict) -> Response:
         return Response(status, json.dumps(obj).encode("utf-8"), [("Content-Type", "application/json")])
@@ -83,6 +90,8 @@ class App:
             if self.watchdog:
                 self.watchdog.ping(self.clock())
             return self._json(200, {"app": appmode.APP_ID, "ok": True})
+        if self.loading:
+            return _html(200, LOADING_PAGE)
         if method == "POST" and path in UPLOAD_PATHS:
             return self._upload(path, headers, body)
 
@@ -98,7 +107,7 @@ class App:
                             data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS)
             if method == "POST":
                 return self._post(conn, ctx, path, headers, body)
-            if path in ("/", "/balances") and not self.fixed_today:
+            if path in ("/", "/balances", "/wealth") and not self.fixed_today:
                 try:
                     fx.ensure_fresh(conn, self._today())      # at most every few hours; offline is fine
                 except Exception:
@@ -118,7 +127,15 @@ class App:
 
     def _get(self, conn, ctx, path, q) -> Response:
         if path == "/":
+            return _html(200, views_home.home(conn, ctx))
+        if path == "/dashboard":
             return _html(200, views.dashboard(conn, ctx, q))
+        if path == "/upload":
+            return _html(200, views_home.upload_page(conn, ctx))
+        if path in ("/spending", "/trends"):
+            return _html(200, views_home.spending_page(conn, ctx, q))
+        if path in ("/wealth", "/networth"):
+            return _html(200, views_home.wealth_page(conn, ctx, q))
         if path == "/review":
             return _html(200, views.review(conn, ctx, q))
         if path == "/items":
@@ -127,10 +144,6 @@ class App:
             return _html(200, views.item(conn, ctx, int(path[6:])))
         if path == "/imports":
             return _html(200, views.imports(conn, ctx))
-        if path == "/networth":
-            return _html(200, views_trends.networth_page(conn, ctx, q))
-        if path == "/trends":
-            return _html(200, views_trends.trends_page(conn, ctx, q))
         if path == "/balances":
             return _html(200, views.balances_page(conn, ctx))
         if path == "/goals":
@@ -227,7 +240,7 @@ class App:
             if path == "/import":
                 rep = importer.import_inbox(self.home, conn, date.fromisoformat(self._today()))
                 if not rep.files:
-                    return self._redirect("/imports", "The inbox is empty.", err=True)
+                    return self._redirect("/upload", "The inbox is empty.", err=True)
                 bad = [f for f in rep.files if f.status == "unrecognised"]
                 dup = [f for f in rep.files if f.status == "duplicate"]
                 msg = f"{len(rep.imported)} file(s) imported"
@@ -235,7 +248,7 @@ class App:
                     msg += f"; {len(dup)} had already been imported, so nothing was added twice"
                 if bad:
                     msg += f"; {len(bad)} not recognised ({', '.join(f.name for f in bad[:3])})"
-                return self._redirect("/imports", msg, err=bool(bad))
+                return self._redirect("/upload", msg, err=bool(bad))
             if len(m) == 4 and m[1] == "imports" and m[3] == "submit":
                 try:
                     commits.submit(conn, self.home, int(m[2]), who, form.get("ack") == "1", self._today())
@@ -336,7 +349,7 @@ class App:
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
             if path == "/setting/reimbursed":
                 summary.set_include_reimbursed(conn, form.get("on") == "1")
-                return self._redirect(form.get("next") if form.get("next") in ("/", "/trends") else "/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
+                return self._redirect(form.get("next") if form.get("next") in ("/", "/spending") else "/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
             if path == "/fx/refresh":
                 res = fx.refresh_current(conn, self._today(), force=True)
                 if res["status"] == "failed":
@@ -385,19 +398,30 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
                 return
             port = appmode.pick_port(port + 1)
     conn = connect(home.db_path)
-    try:                                              # load what you already gave me, once, before the window opens
-        if firstrun.needed(conn, appmode.app_dir()):
-            firstrun.run(conn, home, appmode.app_dir())
-        firstrun.repair(conn, appmode.app_dir())
-    except Exception:
-        import traceback
-        print(traceback.format_exc())
+    try:
+        need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn)
     finally:
         conn.close()
     if lan and not pin:
         pin = f"{secrets.randbelow(10 ** 6):06d}"
     watchdog = appmode.Watchdog(time.time()) if app_mode else None
     app = App(home, pin, lan, watchdog=watchdog)
+    app.loading = need_load
+
+    def load_starting_data():
+        c = connect(home.db_path)
+        try:
+            if firstrun.needed(c, appmode.app_dir()):
+                firstrun.run(c, home, appmode.app_dir())
+            firstrun.repair(c, appmode.app_dir())
+        except Exception:
+            import traceback
+            print(traceback.format_exc())
+        finally:
+            c.close()
+            app.loading = False
+    if need_load:             # the window opens at once and shows a loading page, instead of nothing for a minute
+        threading.Thread(target=load_starting_data, daemon=True).start()
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, res: Response):

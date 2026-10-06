@@ -179,3 +179,46 @@ def data_table(header: list[str], rows: list[list], caption: str) -> str:
     body = "".join("<tr>" + "".join(f"<td>{escape(str(c))}</td>" for c in r) + "</tr>" for r in rows)
     return (f'<details class="tableview"><summary>Table view</summary><table><caption>{escape(caption)}</caption>'
             f"<thead><tr>{head}</tr></thead><tbody>{body}</tbody></table></details>")
+
+
+def bar_chart(points: list[tuple[str, float]], currency: str, label: str, signed: bool = False, average: bool = True) -> str:
+    """One bar per period. points: (label like '2026-03', value). With signed=True, falls are drawn in the second hue
+    below a zero line (used for 'how much did it change')."""
+    if not points:
+        return '<p class="muted">No data yet.</p>'
+    W, H, L, R, T, B = 640, 250, 56, 12, 16, 30
+    vals = [v for _, v in points]
+    hi, lo = max(max(vals), 0.0), min(min(vals), 0.0) if signed else 0.0
+    top, _ = nice_axis(max(hi, abs(lo)) or 1)
+    floor = -top if lo < 0 else 0.0
+    ticks = [floor + i * (top - floor) / 4 for i in range(5)]
+    n = len(points)
+    gw = (W - L - R) / n
+    bw = max(3.0, min(34.0, gw * 0.7))
+
+    def sy(v):
+        return T + (H - T - B) * (1 - (v - floor) / (top - floor))
+
+    zero = sy(0.0)
+    out = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
+    for t in ticks:
+        y = sy(t)
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>'
+                   f'<text x="{L - 8}" y="{y + 4:.1f}" text-anchor="end" class="axis">{escape(compact(t, currency))}</text>')
+    step = max(1, math.ceil(n / 9))
+    for i, (lab, v) in enumerate(points):
+        cx = L + gw * i + gw / 2
+        y0, y1 = sorted((zero, sy(v)))
+        colour = "--s2" if (signed and v < 0) else "--s1"
+        if y1 - y0 >= 0.5:
+            out.append(f'<rect x="{cx - bw / 2:.1f}" y="{y0:.1f}" width="{bw:.1f}" height="{y1 - y0:.1f}" rx="3" fill="var({colour})"/>')
+        out.append(f'<rect x="{cx - gw / 2:.1f}" y="{T}" width="{gw:.1f}" height="{H - T - B}" fill="transparent" data-tip="{escape(f"{lab}: {money(v, currency)}")}"/>')
+        if i % step == 0 or i == n - 1 and (n - 1) % step >= step // 2 + 1:
+            out.append(f'<text x="{cx:.1f}" y="{H - 8}" text-anchor="middle" class="axis">{escape(lab[2:] if len(lab) == 7 else lab)}</text>')
+    out.append(f'<line x1="{L}" x2="{W - R}" y1="{zero:.1f}" y2="{zero:.1f}" class="baseline"/>')
+    if average and n > 1 and not signed:
+        avg = sum(vals) / n
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{sy(avg):.1f}" y2="{sy(avg):.1f}" stroke="var(--ink2)" stroke-dasharray="5 4" stroke-width="1.5"/>'
+                   f'<text x="{W - R}" y="{sy(avg) - 5:.1f}" text-anchor="end" class="axis">average {escape(compact(avg, currency))}</text>')
+    out.append("</svg>")
+    return "".join(out)

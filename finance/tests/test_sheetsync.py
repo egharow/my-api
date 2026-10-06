@@ -169,7 +169,7 @@ def test_sheet_page_guides_the_setup_and_validates_the_address(home, conn, monke
     app = App(home, today="2026-10-05")
     page = app.handle("GET", "/sheet", H).body.decode()
     assert "Not linked yet" in page and "Extensions" in page and sheetsync.token(conn) in page
-    assert "not linked yet" in app.handle("GET", "/", H).body.decode().lower()
+    assert "not linked yet" in app.handle("GET", "/dashboard", H).body.decode().lower()
     bad = _post(app, "/sheet/link", {"url": "https://example.com"})
     assert _flash(bad).startswith("err|")
     monkeypatch.setattr(urllib.request, "urlopen", FakeGoogle())

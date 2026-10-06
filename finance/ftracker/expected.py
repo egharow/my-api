@@ -69,3 +69,100 @@ def expected_files(conn: sqlite3.Connection, today: str) -> list[dict]:
     for r in conn.execute("SELECT title FROM discrepancies WHERE type = 'missing_statement' AND status = 'open'"):
         items.append({"source": "Card statement", "period": "", "status": "missing", "detail": r["title"]})
     return items
+
+
+# Sources you should have even before the first file arrives. `optional` ones never block anything.
+EXTRA_SOURCES = [
+    {"name": "Shir's Isracard", "kind": "card", "issuer": "isracard", "owner": "Shir", "optional": False},
+    {"name": "Member card (Max It)", "kind": "card", "label_contains": "בהצדעה", "optional": True},
+    {"name": "Shir's Leumi account", "kind": "bank", "issuer": "leumi", "owner": "Shir", "optional": True},
+]
+
+
+def _month_label(y: int, m: int) -> str:
+    return date(y, m, 1).strftime("%B %Y")
+
+
+def _has_statement(conn, account_id: int, y: int, m: int, covered: set[str]) -> str | None:
+    key = f"{y:04d}-{m:02d}"
+    row = conn.execute("SELECT billing_date FROM statements WHERE account_id = ? AND billing_date LIKE ? LIMIT 1",
+                       (account_id, key + "%")).fetchone()
+    if row:
+        return f"billed {row[0]}"
+    return "already in your history" if key in covered else None
+
+
+def checklist(conn: sqlite3.Connection, today: str) -> dict:
+    """Everything that should be uploaded or entered for the current round, each with a done/to-do state.
+
+    Uploading a file changes the state because the state is worked out from what is stored.
+    """
+    now_d = date.fromisoformat(today)
+    row = conn.execute("SELECT value FROM settings WHERE key = 'history_months'").fetchone()
+    history = set(json.loads(row[0])) if row else set()
+    prev = (now_d.year, now_d.month - 1) if now_d.month > 1 else (now_d.year - 1, 12)
+    cards, banks, other = [], [], []
+    matched_accounts: set[int] = set()
+
+    def owner_name(a):
+        r = conn.execute("SELECT name FROM owners WHERE id = ?", (a["owner_id"],)).fetchone()
+        return r[0] if r else None
+
+    for a in conn.execute("SELECT * FROM accounts WHERE kind IN ('card','bank') AND active = 1 AND issuer != 'sheet' ORDER BY kind, label"):
+        matched_accounts.add(a["id"])
+        if a["kind"] == "card":
+            stmts = [date.fromisoformat(r[0]) for r in conn.execute(
+                "SELECT billing_date FROM statements WHERE account_id = ? AND billing_date IS NOT NULL", (a["id"],))]
+            if not stmts:
+                continue
+            day = Counter(d.day for d in stmts).most_common(1)[0][0]
+            covered = {r[0] for r in conn.execute("SELECT month FROM coverage WHERE account_id = ?", (a["id"],))} | history
+            first = min(stmts)
+            for y, m in (prev, (now_d.year, now_d.month)):
+                if (y, m) < (first.year, first.month):
+                    continue
+                got = _has_statement(conn, a["id"], y, m, covered)
+                due = date(y, m, min(day, 28))
+                if got:
+                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "done", "detail": got})
+                elif due > now_d:
+                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "waiting",
+                                  "detail": f"not due yet, billed around {due.isoformat()}"})
+                else:
+                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "todo",
+                                  "detail": f"billed around {due.isoformat()}"})
+        else:
+            ends = [r[0] for r in conn.execute(
+                "SELECT period_end FROM statements WHERE account_id = ? AND period_end IS NOT NULL", (a["id"],))]
+            if not ends:
+                continue
+            last = date.fromisoformat(max(ends))
+            fresh = (now_d - last).days <= BANK_STALE_DAYS
+            banks.append({"label": a["label"], "status": "done" if fresh else "todo",
+                          "detail": f"covers up to {last.isoformat()}" if fresh else f"latest statement ends {last.isoformat()}"})
+
+    for src in EXTRA_SOURCES:
+        found = False
+        for a in conn.execute("SELECT * FROM accounts WHERE kind = ? AND active = 1 AND issuer != 'sheet'", (src["kind"],)):
+            if src.get("issuer") and a["issuer"] != src["issuer"]:
+                continue
+            if src.get("owner") and owner_name(a) != src["owner"]:
+                continue
+            if src.get("label_contains") and src["label_contains"] not in a["label"]:
+                continue
+            found = conn.execute("SELECT 1 FROM statements WHERE account_id = ?", (a["id"],)).fetchone() is not None
+            if found:
+                break
+        if found:
+            continue            # already listed above from its own account
+        target = banks if src["kind"] == "bank" else cards
+        target.append({"label": src["name"], "status": "optional" if src["optional"] else "todo",
+                       "detail": "nice to have, not required" if src["optional"] else "not uploaded yet"})
+
+    due_b, last_b = balances.balances_due(conn, today)
+    other.append({"label": "Balances (every 2 months)", "status": "todo" if due_b else "done",
+                  "detail": f"last updated {last_b}" if last_b else "never entered", "link": "/balances"})
+    groups = [{"title": "Card statements", "items": cards}, {"title": "Bank statements", "items": banks},
+              {"title": "Numbers you type", "items": other}]
+    counted = [i for g in groups for i in g["items"] if i["status"] in ("done", "todo")]
+    return {"groups": groups, "done": sum(1 for i in counted if i["status"] == "done"), "total": len(counted)}

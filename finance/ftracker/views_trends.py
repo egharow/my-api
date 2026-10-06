@@ -4,7 +4,7 @@ from html import escape as esc
 
 from . import balances, charts, summary
 from .charts import money
-from .views import Ctx, _form, _month_window, _tile, layout
+from .views import Ctx, _form, _month_window, _tile
 
 KIND_LABEL = {"bank": "Bank accounts", "savings": "Savings", "investment": "Investments", "pension": "Pension & provident funds",
               "real_estate": "Real estate", "loan": "Loans & debts", "other": "Other"}
@@ -18,19 +18,17 @@ def _switch(base: str, current: str, options: list[tuple[str, str]], key: str, k
     return " ".join(f'<a href="{href(v)}"{" style=font-weight:700" if v == current else ""}>{esc(t)}</a>' for v, t in options)
 
 
-def networth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
+def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wealth") -> str:
     cur = q.get("cur") if q.get("cur") in ("ILS", "USD") else "ILS"
     owner = q.get("owner") or None
     dates = [r[0] for r in conn.execute("SELECT DISTINCT as_of FROM balances ORDER BY as_of")]
     if not dates:
-        return layout(conn, ctx, "/networth", "Net worth",
-                      '<h1>Net worth</h1><div class="card"><p>No balances yet. Type them on the <a href="/balances">Balances</a> page.</p></div>')
+        return '<div class="card"><p>No balances yet. Type them on the <a href="/balances">Balances</a> page.</p></div>'
     try:
         snaps = [balances.net_worth(conn, d, cur, owner) for d in dates]
     except LookupError:
-        return layout(conn, ctx, "/networth", "Net worth",
-                      '<h1>Net worth</h1><div class="banner"><b>No dollar rate yet.</b> '
-                      '<a href="/balances">Enter it or fetch it on the Balances page</a>.</div>')
+        return ('<div class="banner"><b>No dollar rate yet.</b> '
+                '<a href="/balances">Enter it or fetch it on the Balances page</a>.</div>')
     now, prev = snaps[-1], (snaps[-2] if len(snaps) > 1 else None)
     prev_by = {l["account"]: l["value"] for l in prev["lines"]} if prev else {}
     assets = sum(l["value"] for l in now["lines"] if l["value"] > 0)
@@ -69,29 +67,32 @@ def networth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
                                 for s in snaps], "Net worth by type and date")
     owners = [r[0] for r in conn.execute("SELECT name FROM owners ORDER BY name")]
     keep = {"cur": cur, "owner": owner}
-    who = _switch("/networth", owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"cur": cur})
-    money_sw = _switch("/networth", cur, [("ILS", "₪"), ("USD", "$")], "cur", {"owner": owner})
+    who = _switch(base, owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"cur": cur})
+    money_sw = _switch(base, cur, [("ILS", "₪"), ("USD", "$")], "cur", {"owner": owner})
     source = (f'<p class="muted">Where this comes from: the balances you type on the <a href="/balances">Balances</a> page and the ones '
               f'imported from your old sheet ({len(dates)} snapshot dates, {esc(dates[0])} to {esc(dates[-1])}). Each account keeps its last '
               f'typed value until you enter a new one. Dollar accounts use the current rate for every date, so the chart shows how your assets '
               f'moved, not the exchange rate.</p>')
-    html = (f'<h1>Net worth</h1><p>{who} &nbsp;·&nbsp; {money_sw}</p>{tiles}{source}'
+    deltas = [(snaps[i]["as_of"], snaps[i]["total"] - snaps[i - 1]["total"]) for i in range(1, len(snaps))]
+    html = (f'<p>{who} &nbsp;·&nbsp; {money_sw}</p>{tiles}{source}'
             f'<section class="card"><h2>Total over time</h2>{charts.line_chart(pts, cur, "Net worth over time")}</section>'
+            f'<section class="card" style="margin-top:16px"><h2>Change between updates</h2>{charts.bar_chart(deltas, cur, "Net worth change", signed=True)}'
+            f'<p class="muted">Blue: it grew. Orange: it fell. Each bar is the change since the previous update of your balances.</p></section>'
             f'<section class="card" style="margin-top:16px"><h2>What it is made of</h2>{table}</section>'
             f'<h2 style="margin-top:16px">By type over time</h2><div class="grid">{"".join(small)}</div>{matrix}')
-    return layout(conn, ctx, "/networth", "Net worth", html)
+    return html
 
 
 RANGES = [("6", "6 months"), ("12", "12 months"), ("24", "2 years"), ("all", "All")]
 
 
-def trends_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
+def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spending") -> str:
     rng = q.get("range") if q.get("range") in {r for r, _ in RANGES} else "all"
     owner = q.get("owner") or None
     cat = q.get("cat") or None
     with_spend = [m for m in summary.months_available(conn) if summary.spending_by_category(conn, m, owner)]
     if not with_spend:
-        return layout(conn, ctx, "/trends", "Trends", '<h1>Trends</h1><div class="card"><p>No spending to show yet.</p></div>')
+        return '<div class="card"><p>No spending to show yet.</p></div>'
     window = _month_window(with_spend, 240 if rng == "all" else int(rng))
     data: dict[str, dict[str, float]] = {}
     for m in window:
@@ -121,29 +122,29 @@ def trends_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
              + _tile("Latest month", money(totals[have[-1]]) if have else "–", esc(have[-1] if have else "")) + "</div>")
 
     def series(c):
-        return [(f"{m}-01", data[m].get(c, 0.0) if c else totals[m]) for m in have]
+        return [(m, data[m].get(c, 0.0) if c else totals[m]) for m in have]
 
     reimb = ""
     inc_r = summary.include_reimbursed(conn)
     reimb = _form(ctx, "/setting/reimbursed",
                   f'<span>Vituri (paid back in cash) is {"counted in" if inc_r else "left out of"} these numbers.</span>'
-                  f'<input type="hidden" name="on" value="{0 if inc_r else 1}"><input type="hidden" name="next" value="/trends">'
+                  f'<input type="hidden" name="on" value="{0 if inc_r else 1}"><input type="hidden" name="next" value="{base}">'
                   f'<button class="quiet">{"Leave out" if inc_r else "Include"}</button>', "row")
 
     owners = [r[0] for r in conn.execute("SELECT name FROM owners ORDER BY name")]
     keep = {"owner": owner}
-    controls = (f'<p>{_switch("/trends", rng, RANGES, "range", keep)} &nbsp;·&nbsp; '
-                f'{_switch("/trends", owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"range": rng})}</p>')
+    controls = (f'<p>{_switch(base, rng, RANGES, "range", keep)} &nbsp;·&nbsp; '
+                f'{_switch(base, owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"range": rng})}</p>')
 
     if cat in cat_total:
-        main = (f'<section class="card"><h2>{esc(cat)} by month <small><a href="/trends?range={rng}">back to all</a></small></h2>'
-                f'{charts.line_chart(series(cat), "ILS", cat + " by month")}'
+        main = (f'<section class="card"><h2>{esc(cat)} by month <small><a href="{base}?range={rng}">back to all</a></small></h2>'
+                f'{charts.bar_chart(series(cat), "ILS", cat + " by month")}'
                 f'<p class="muted">Total {esc(money(cat_total[cat]))}, average {esc(money(cat_total[cat] / len(have)))} a month.</p></section>')
         small = ""
     else:
-        main = (f'<section class="card"><h2>Total spending by month</h2>{charts.line_chart(series(None), "ILS", "Spending by month")}</section>')
-        cards = "".join(f'<section class="card"><h2><a href="/trends?range={rng}&cat={esc(c)}{"&owner=" + esc(owner) if owner else ""}">{esc(c)}</a>'
-                        f' <small>{esc(money(cat_total[c]))}</small></h2>{charts.line_chart(series(c), "ILS", c + " by month")}</section>'
+        main = (f'<section class="card"><h2>Total spending by month</h2>{charts.bar_chart(series(None), "ILS", "Spending by month")}</section>')
+        cards = "".join(f'<section class="card"><h2><a href="{base}?range={rng}&cat={esc(c)}{"&owner=" + esc(owner) if owner else ""}">{esc(c)}</a>'
+                        f' <small>{esc(money(cat_total[c]))}</small></h2>{charts.bar_chart(series(c), "ILS", c + " by month", average=False)}</section>'
                         for c in ranked[:6])
         small = f'<h2 style="margin-top:16px">Biggest categories over time</h2><div class="grid">{cards}</div>'
 
@@ -151,12 +152,12 @@ def trends_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     rows = []
     for c in ranked:
         cells = "".join(f'<td class="n">{data[m].get(c, 0):,.0f}</td>' for m in have)
-        rows.append(f'<tr><td dir="auto"><a href="/trends?range={rng}&cat={esc(c)}{"&owner=" + esc(owner) if owner else ""}">{esc(c)}</a></td>{cells}'
+        rows.append(f'<tr><td dir="auto"><a href="{base}?range={rng}&cat={esc(c)}{"&owner=" + esc(owner) if owner else ""}">{esc(c)}</a></td>{cells}'
                     f'<td class="n"><b>{cat_total[c]:,.0f}</b></td><td class="n">{cat_total[c] / len(have):,.0f}</td></tr>')
     foot = "".join(f'<td class="n"><b>{totals[m]:,.0f}</b></td>' for m in have)
     matrix = (f'<section class="card" style="margin-top:16px"><h2>Every category, every month</h2><div style="overflow-x:auto"><table>'
               f'<thead><tr><th>Category</th>{head}<th class="n">Total</th><th class="n">Avg / month</th></tr></thead><tbody>{"".join(rows)}</tbody>'
               f'<tfoot><tr><td><b>Total</b></td>{foot}<td class="n"><b>{grand:,.0f}</b></td><td class="n"><b>{avg:,.0f}</b></td></tr></tfoot></table></div>'
               f'<p class="muted">Amounts in ₪, by billing month. Card payments and transfers between your own accounts are not counted.</p></section>')
-    html = f'<h1>Trends</h1>{controls}{tiles}<p>{esc(trend_note)}</p>{reimb}{main}{small}{matrix}'
-    return layout(conn, ctx, "/trends", "Trends", html)
+    html = f'{controls}{tiles}<p>{esc(trend_note)}</p>{reimb}{main}{small}{matrix}'
+    return html

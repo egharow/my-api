@@ -76,8 +76,7 @@ document.addEventListener('mousemove',function(e){t.style.left=Math.min(e.client
 document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))t.style.display='none'});})();
 """
 
-NAV = [("/", "Dashboard"), ("/review", "Review"), ("/items", "Needs attention"), ("/imports", "Imports"),
-       ("/networth", "Net worth"), ("/trends", "Trends"), ("/balances", "Balances"), ("/goals", "Goals"), ("/sheet", "Google Sheet"), ("/setup", "Setup")]
+NAV = [("/", "Home"), ("/upload", "Upload"), ("/review", "Review"), ("/spending", "Spending"), ("/wealth", "Wealth"), ("/setup", "Settings")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:

@@ -107,6 +107,10 @@ def dismiss_notice(conn: sqlite3.Connection) -> None:
 REPAIR_KEY = "repair_old_sheet_categories_v3"
 
 
+def repair_done(conn: sqlite3.Connection) -> bool:
+    return conn.execute("SELECT 1 FROM settings WHERE key = ?", (REPAIR_KEY,)).fetchone() is not None
+
+
 def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
     """One-time: restore categories you set in the old sheet that an earlier build overrode (Bit lines, Investment)."""
     if conn.execute("SELECT 1 FROM settings WHERE key = ?", (REPAIR_KEY,)).fetchone():
