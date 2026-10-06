@@ -155,3 +155,17 @@ def test_guess_from_similar_words_is_only_a_proposal(tmp_path):
     got = categorize._guess(conn, "מכבידנט", -50.0)
     assert got and got[0] == cid
     assert categorize._guess(conn, "משהו אחר לגמרי", -50.0) is None
+
+
+def test_duplicate_leumi_accounts_are_merged_with_their_balances(tmp_path):
+    from ftracker import balances
+    conn = db.connect(tmp_path / "m.db")
+    a = accounts.add_account(conn, "bank", "manual", "לאומי")
+    b = accounts.add_account(conn, "bank", "leumi", "Leumi 5939")
+    balances.set_balance_for(conn, a, 100.0, "2026-01-01")
+    balances.set_balance_for(conn, b, 250.0, "2026-02-01")
+    assert firstrun.merge_duplicate_leumi(conn) is True
+    rows = conn.execute("SELECT account_id, amount FROM balances ORDER BY as_of").fetchall()
+    assert [(r["account_id"], r["amount"]) for r in rows] == [(b, 100.0), (b, 250.0)]
+    assert conn.execute("SELECT active FROM accounts WHERE id = ?", (a,)).fetchone()[0] == 0
+    assert firstrun.merge_duplicate_leumi(conn) is False

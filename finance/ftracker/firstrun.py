@@ -104,7 +104,18 @@ def dismiss_notice(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-REPAIR_KEY = "repair_old_sheet_categories_v3"
+REPAIR_KEY = "repair_old_sheet_categories_v4"
+
+
+def merge_duplicate_leumi(conn: sqlite3.Connection) -> bool:
+    """The old sheet's "לאומי" account and the Leumi statement account are one account: keep the statement one."""
+    from . import accounts
+    src = conn.execute("SELECT id FROM accounts WHERE kind = 'bank' AND issuer = 'manual' AND label = 'לאומי' AND active = 1").fetchone()
+    dst = conn.execute("SELECT id FROM accounts WHERE kind = 'bank' AND issuer = 'leumi' AND active = 1 ORDER BY id LIMIT 1").fetchone()
+    if not src or not dst:
+        return False
+    accounts.merge_accounts(conn, src[0], dst[0])
+    return True
 
 
 def repair_done(conn: sqlite3.Connection) -> bool:
@@ -120,6 +131,7 @@ def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
     if history.exists():
         fixed = sheet_import.restore_categories(conn, sheet_import.parse_workbook(history))
     categorize.resuggest(conn)
+    merge_duplicate_leumi(conn)
     _set(conn, REPAIR_KEY, str(fixed))
     conn.commit()
     return fixed

@@ -124,3 +124,21 @@ def add_alias(conn: sqlite3.Connection, owner: str, alias: str) -> None:
 def remove_alias(conn: sqlite3.Connection, alias_id: int) -> None:
     conn.execute("DELETE FROM owner_aliases WHERE id = ?", (alias_id,))
     conn.commit()
+
+
+def merge_accounts(conn: sqlite3.Connection, src_id: int, dst_id: int) -> None:
+    """Fold a duplicate account into the one you keep: its balances, lines and links move over, and it is switched off."""
+    if src_id == dst_id:
+        raise ValueError("choose two different accounts")
+    for table, key in (("balances", "as_of"), ("coverage", "month")):
+        conn.execute(f"DELETE FROM {table} WHERE account_id = ? AND {key} IN (SELECT {key} FROM {table} WHERE account_id = ?)", (src_id, dst_id))
+        conn.execute(f"UPDATE {table} SET account_id = ? WHERE account_id = ?", (dst_id, src_id))
+    conn.execute("UPDATE transactions SET account_id = ? WHERE account_id = ?", (dst_id, src_id))
+    conn.execute("UPDATE transactions SET counterparty_account_id = ? WHERE counterparty_account_id = ?", (dst_id, src_id))
+    conn.execute("UPDATE rules SET counterparty_account_id = ? WHERE counterparty_account_id = ?", (dst_id, src_id))
+    conn.execute("UPDATE accounts SET pays_from_account_id = ? WHERE pays_from_account_id = ?", (dst_id, src_id))
+    conn.execute("UPDATE OR IGNORE statements SET account_id = ? WHERE account_id = ?", (dst_id, src_id))
+    conn.execute("UPDATE OR IGNORE goal_accounts SET account_id = ? WHERE account_id = ?", (dst_id, src_id))
+    conn.execute("DELETE FROM goal_accounts WHERE account_id = ?", (src_id,))
+    conn.execute("UPDATE accounts SET active = 0 WHERE id = ?", (src_id,))
+    conn.commit()
