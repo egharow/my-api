@@ -61,6 +61,55 @@ def _similar_past(conn: sqlite3.Connection, desc: str):
     return best
 
 
+def _tokens(desc: str) -> set[str]:
+    """Words of a merchant name, plus 3-letter pieces so spelling variants still share evidence."""
+    key = merchant_key(desc)
+    words = {w for w in key.split() if len(w) >= 2}
+    grams = {w[i:i + 3] for w in words for i in range(len(w) - 2)} if words else set()
+    return words | grams
+
+
+GUESS_MIN_SHARE = 0.55   # the winning category must hold at least this share of the evidence
+GUESS_MIN_LINES = 3      # and that evidence must come from at least this many past payments
+
+
+def _guess(conn: sqlite3.Connection, desc: str, amount: float):
+    """Learn from every payment you already categorised: which category do this name's words point to?
+
+    Returns (category_id, share, n_lines, example) or None. Only ever a suggestion for you to confirm.
+    """
+    toks = _tokens(desc)
+    if not toks:
+        return None
+    rows = conn.execute(
+        """SELECT t.description, t.category_id FROM transactions t JOIN categories c ON c.id = t.category_id
+           WHERE t.category_status = 'approved' AND c.name != 'Uncategorised' AND t.kind IN ('purchase','other','refund')
+             AND ((t.amount < 0) = (? < 0))""", (amount,)).fetchall()
+    score: dict[int, float] = {}
+    support: dict[int, int] = {}
+    example: dict[int, tuple[float, str]] = {}
+    for r in rows:
+        shared = toks & _tokens(r["description"])
+        if not shared:
+            continue
+        weight = len(shared) / len(toks | _tokens(r["description"]))     # Jaccard overlap
+        if weight < 0.2:
+            continue
+        cid = r["category_id"]
+        score[cid] = score.get(cid, 0.0) + weight
+        support[cid] = support.get(cid, 0) + 1
+        if weight > example.get(cid, (0, ""))[0]:
+            example[cid] = (weight, r["description"])
+    total = sum(score.values())
+    if not total:
+        return None
+    cid = max(score, key=score.get)
+    share = score[cid] / total
+    if share < GUESS_MIN_SHARE or support[cid] < GUESS_MIN_LINES:
+        return None
+    return cid, share, support[cid], example[cid][1]
+
+
 def uncategorised_id(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT id FROM categories WHERE name = 'Uncategorised'").fetchone()[0]
 
@@ -95,6 +144,12 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
             score, n, category_id = similar
             confidence = round(score * 0.9, 2)
             basis = f"similar to {n} earlier approved payment(s)"
+        else:
+            guess = _guess(conn, t["description"], t["amount"])
+            if guess:
+                category_id, share, n, example = guess
+                confidence = round(min(share, 0.85) * 0.6, 2)
+                basis = f"best guess from {n} payments with similar words, e.g. “{example}”"
     if t["amount"] > 0 and kind == "purchase":
         kind = "refund"
 
@@ -103,6 +158,25 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
                   proposal_basis = ?, kind = ?, expects_refund_by = ?, counterparty_account_id = ?
            WHERE id = ?""",
         (category_id, status, confidence, basis, kind, refund_by, counterparty, txn_id))
+
+
+def resuggest(conn: sqlite3.Connection) -> int:
+    """Run the suggestions again for lines still waiting for you, now that more of your choices are known.
+
+    Only lines nobody has approved or edited and that sit in a draft import are touched.
+    """
+    ids = [r[0] for r in conn.execute(
+        """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id
+           WHERE t.category_status = 'proposed' AND b.status != 'committed'
+             AND (t.category_id = (SELECT id FROM categories WHERE name = 'Uncategorised')
+                  OR t.proposal_basis LIKE 'best guess%' OR t.proposal_basis LIKE 'similar to%')""")]
+    before = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status='proposed' AND category_id = ?",
+                          (uncategorised_id(conn),)).fetchone()[0]
+    for tid in ids:
+        classify(conn, tid)
+    after = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status='proposed' AND category_id = ?",
+                         (uncategorised_id(conn),)).fetchone()[0]
+    return max(before - after, 0)
 
 
 def large_unreviewed(conn: sqlite3.Connection, batch_id: int | None = None):

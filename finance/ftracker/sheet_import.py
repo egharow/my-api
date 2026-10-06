@@ -393,6 +393,7 @@ def save(conn: sqlite3.Connection, data: HistoryData, primary_owner: str = "Ely"
                  (json.dumps(sorted({m.month for m in data.months})),))
     nw = _save_net_worth(conn, data, batch_id, primary_owner, partner_owner, links)
     learned = learn_rules(conn)
+    categorize.resuggest(conn)
     audit(conn, "sheet_import", "batch", batch_id, f"{new_tx} lines, {nw['balances']} balances", "import")
     if new_tx == 0 and not conn.execute("SELECT 1 FROM monthly_entries WHERE batch_id = ?", (batch_id,)).fetchone():
         conn.execute("DELETE FROM balances WHERE batch_id = ?", (batch_id,))

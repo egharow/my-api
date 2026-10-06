@@ -14,7 +14,7 @@ import traceback
 from datetime import date, datetime
 from pathlib import Path
 
-from . import importer, sheet_import, starter
+from . import categorize, importer, sheet_import, starter
 from .config import Home
 
 KEY = "seed_applied"
@@ -104,7 +104,7 @@ def dismiss_notice(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-REPAIR_KEY = "repair_old_sheet_categories_v2"
+REPAIR_KEY = "repair_old_sheet_categories_v3"
 
 
 def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
@@ -115,6 +115,7 @@ def repair(conn: sqlite3.Connection, app_dir: Path) -> int:
     fixed = 0
     if history.exists():
         fixed = sheet_import.restore_categories(conn, sheet_import.parse_workbook(history))
+    categorize.resuggest(conn)
     _set(conn, REPAIR_KEY, str(fixed))
     conn.commit()
     return fixed

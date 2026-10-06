@@ -138,3 +138,20 @@ def test_vituri_is_separate_and_toggleable(tmp_path):
     assert summary.include_reimbursed(conn) is False
     summary.set_include_reimbursed(conn, True)
     assert summary.include_reimbursed(conn) is True
+
+
+def test_guess_from_similar_words_is_only_a_proposal(tmp_path):
+    conn = db.connect(tmp_path / "g.db")
+    cid = conn.execute("SELECT id FROM categories WHERE name = 'Medical'").fetchone()[0]
+    conn.execute("INSERT INTO accounts (kind, issuer, label, currency, created_at) VALUES ('card','x','t','ILS','x')")
+    a = conn.execute("SELECT id FROM accounts ORDER BY id DESC LIMIT 1").fetchone()[0]
+    conn.execute("INSERT INTO batches (status, created_at) VALUES ('draft','x')")
+    b = conn.execute("SELECT id FROM batches ORDER BY id DESC LIMIT 1").fetchone()[0]
+    for i, d in enumerate(["מכבי דנט נס ציונה", "מכבי דנט רחובות", "מכבי דנט ראשון", "מכבי דנט חולון"]):
+        conn.execute("""INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description,
+                        description_norm, amount, currency, category_id, category_status, kind, created_at)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (b, a, f"k{i}", "2025-01-01", "2025-01", d, d, -100.0, "ILS", cid, "approved", "purchase", "x"))
+    got = categorize._guess(conn, "מכבידנט", -50.0)
+    assert got and got[0] == cid
+    assert categorize._guess(conn, "משהו אחר לגמרי", -50.0) is None
