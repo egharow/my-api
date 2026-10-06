@@ -54,16 +54,19 @@ def start_app() -> subprocess.Popen:
 
 
 def health() -> dict | None:
+    """Is the app answering? Ignores any system proxy, and also accepts an older copy still running (no /health yet)."""
     import json
     import urllib.request
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     for port in PORTS:
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=1) as resp:
-                data = json.loads(resp.read().decode())
-                if data.get("app") == "finance-tracker":
-                    return {**data, "port": port}
-        except Exception:
-            continue
+        for path in ("/health", "/ping"):
+            try:
+                with opener.open(f"http://127.0.0.1:{port}{path}", timeout=2) as resp:
+                    data = json.loads(resp.read().decode())
+                    if data.get("app") == "finance-tracker":
+                        return {"page_seen": data.get("page_seen", path == "/ping"), "port": port}
+            except Exception:
+                continue
     return None
 
 
@@ -78,7 +81,7 @@ def launch() -> None:
     """Start the app and make sure you actually see it: report a crash, and fall back to the normal browser."""
     import webbrowser
     proc = start_app()
-    deadline = time.time() + 150            # the very first start loads your history, which takes a little while
+    deadline = time.time() + 300            # the very first start loads your history, which takes a little while
     up = None
     while time.time() < deadline:
         up = health()
@@ -88,9 +91,14 @@ def launch() -> None:
     if not up:
         up = health()
     if not up:
-        details = tail(START_LOG) or tail(APP / "launcher-log.txt")
+        exited = proc.poll()
+        found = [p for p in (START_LOG, APP / "data" / "app-log.txt", Path.home() / "Finance" / "app-log.txt") if p.exists()]
+        details = "\n".join(tail(p, 12) for p in found).strip()
+        what = (f"The app stopped right away (exit code {exited})." if exited is not None
+                else "The app was still not answering after 5 minutes.")
         alert("Finance Tracker did not start",
-              f"The app did not come up.\n\n{details}\n\nThe full text is in:\n{START_LOG}\nPlease send me that file.")
+              f"{what}\n\n{details}\n\nPlease send me these files from the Finance folder: app-start-log.txt and launcher-log.txt "
+              f"(and app-log.txt if there is one).")
         return
     for _ in range(20):                     # up, but did a window load it?
         if (health() or {}).get("page_seen"):
