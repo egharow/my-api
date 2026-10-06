@@ -96,3 +96,15 @@ def test_the_starter_file_can_carry_the_shared_sheet_and_its_secret(conn, home, 
     starter.apply(conn, d / starter.FILENAME)                                                  # twice changes nothing
     page = App(home, today="2026-10-05", app_dir=d).handle("GET", "/sheet", H).body.decode()
     assert "your shared sheet" in page and "docs.google.com/spreadsheets/d/abc" in page and "Copy the script" in page
+
+
+def test_packaged_layout_uses_my_data_and_copies_old_data_once(tmp_path, monkeypatch):
+    from ftracker import config, db
+    monkeypatch.setattr(config.Path, "home", classmethod(lambda cls: tmp_path))
+    old = config.Home(tmp_path / "Finance")
+    old.ensure()
+    db.connect(old.db_path).close()
+    new = config.Home(tmp_path / "FinanceApp" / config.DATA_FOLDER)
+    assert "Copied your existing data" in config.migrate_legacy(new)
+    assert new.db_path.exists() and old.db_path.exists()          # copied, the old one stays
+    assert config.migrate_legacy(new) is None                     # never overwrites what is already there
