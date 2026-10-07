@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from . import amex, isracard, leumi_pdf
+from . import amex, isracard, isracard_pdf, leumi_pdf
 from .base import ParseError, ParsedFile
 
 
@@ -23,10 +23,13 @@ def parse_file(path: Path) -> ParsedFile:
                 return amex.parse_rows(rows)
             raise Unrecognised("Excel file is not a known card export layout")
         if ext == ".pdf":
+            pages = isracard_pdf.read_pages(path)
+            if isracard_pdf.looks_like(pages):
+                return isracard_pdf.parse_pages(pages)
             pages = leumi_pdf.read_pages(path)
             if leumi_pdf.looks_like(pages):
                 return leumi_pdf.parse_pages(pages)
-            raise Unrecognised("PDF is not a known bank statement layout")
+            raise Unrecognised("PDF is not a known statement layout")
     except ParseError as exc:
         raise Unrecognised(f"looked like a known layout but could not be read: {exc}") from exc
     except Unrecognised:

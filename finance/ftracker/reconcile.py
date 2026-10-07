@@ -49,7 +49,19 @@ def _money(x: float) -> str:
     return f"₪{abs(x):,.2f}"
 
 
+def assign_default_payers(conn: sqlite3.Connection) -> None:
+    """A card with no known paying account is paid from your One Zero account when you have one: that is the account
+    your household uses for the card and for investing, so its statements are not expected in a Leumi statement."""
+    payer = conn.execute("""SELECT id FROM accounts WHERE active = 1 AND kind IN ('bank','savings')
+                            AND (label LIKE '%One Zero%' OR label LIKE '%וואן זירו%' OR issuer = 'onezero')
+                            ORDER BY (kind = 'bank') DESC, id LIMIT 1""").fetchone()
+    if payer:
+        conn.execute("""UPDATE accounts SET pays_from_account_id = ? WHERE kind = 'card' AND pays_from_account_id IS NULL
+                        AND owner_id IN (SELECT id FROM owners WHERE name = 'Shir')""", (payer[0],))
+
+
 def match_card_payments(conn: sqlite3.Connection, batch_id: int) -> None:
+    assign_default_payers(conn)
     # A line that is no longer a card payment (for example after a rule change) cannot be missing a statement.
     for d in conn.execute("""SELECT d.fingerprint FROM discrepancies d JOIN transactions t ON t.id = d.subject_id
                              WHERE d.type IN ('missing_statement','payment_mismatch') AND d.status = 'open'
