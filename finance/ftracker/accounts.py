@@ -142,3 +142,20 @@ def merge_accounts(conn: sqlite3.Connection, src_id: int, dst_id: int) -> None:
     conn.execute("DELETE FROM goal_accounts WHERE account_id = ?", (src_id,))
     conn.execute("UPDATE accounts SET active = 0 WHERE id = ?", (src_id,))
     conn.commit()
+
+
+def set_card_payer(conn: sqlite3.Connection, card_id: int, choice: str) -> None:
+    """choice: an account id, 'external' (an account you do not import) or '' (not set)."""
+    card = conn.execute("SELECT id FROM accounts WHERE id = ? AND kind = 'card'", (card_id,)).fetchone()
+    if not card:
+        raise ValueError("unknown card")
+    if choice == "external":
+        conn.execute("UPDATE accounts SET pays_from_account_id = NULL, pays_externally = 1 WHERE id = ?", (card_id,))
+    elif choice.isdigit():
+        if not conn.execute("SELECT 1 FROM accounts WHERE id = ? AND kind IN ('bank','savings')", (int(choice),)).fetchone():
+            raise ValueError("unknown account")
+        conn.execute("UPDATE accounts SET pays_from_account_id = ?, pays_externally = 0 WHERE id = ?", (int(choice), card_id))
+    else:
+        conn.execute("UPDATE accounts SET pays_from_account_id = NULL, pays_externally = 0 WHERE id = ?", (card_id,))
+    audit(conn, "set_card_payer", "account", card_id, choice)
+    conn.commit()

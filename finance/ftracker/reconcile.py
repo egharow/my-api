@@ -49,19 +49,7 @@ def _money(x: float) -> str:
     return f"₪{abs(x):,.2f}"
 
 
-def assign_default_payers(conn: sqlite3.Connection) -> None:
-    """A card with no known paying account is paid from your One Zero account when you have one: that is the account
-    your household uses for the card and for investing, so its statements are not expected in a Leumi statement."""
-    payer = conn.execute("""SELECT id FROM accounts WHERE active = 1 AND kind IN ('bank','savings')
-                            AND (label LIKE '%One Zero%' OR label LIKE '%וואן זירו%' OR issuer = 'onezero')
-                            ORDER BY (kind = 'bank') DESC, id LIMIT 1""").fetchone()
-    if payer:
-        conn.execute("""UPDATE accounts SET pays_from_account_id = ? WHERE kind = 'card' AND pays_from_account_id IS NULL
-                        AND owner_id IN (SELECT id FROM owners WHERE name = 'Shir')""", (payer[0],))
-
-
 def match_card_payments(conn: sqlite3.Connection, batch_id: int) -> None:
-    assign_default_payers(conn)
     # A line that is no longer a card payment (for example after a rule change) cannot be missing a statement.
     for d in conn.execute("""SELECT d.fingerprint FROM discrepancies d JOIN transactions t ON t.id = d.subject_id
                              WHERE d.type IN ('missing_statement','payment_mismatch') AND d.status = 'open'
@@ -107,7 +95,10 @@ def match_card_payments(conn: sqlite3.Connection, batch_id: int) -> None:
     cover = _bank_coverage(conn)
     for s in loose:
         fp = f"no_payment:{s['id']}"
-        payer = conn.execute("SELECT pays_from_account_id FROM accounts WHERE id = ?", (s["account_id"],)).fetchone()[0]
+        payer, external = conn.execute("SELECT pays_from_account_id, pays_externally FROM accounts WHERE id = ?", (s["account_id"],)).fetchone()
+        if external:                                    # paid from an account you do not import: nothing to match against
+            dx.auto_resolve(conn, fp, "this card is paid from an account that is not imported")
+            continue
         if payer is not None:
             has_cover = any(c["account_id"] == payer and c["period_start"] <= s["billing_date"] <= c["period_end"] for c in cover)
         else:

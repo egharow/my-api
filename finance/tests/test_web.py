@@ -214,3 +214,19 @@ def test_settings_and_upload_pages_offer_the_watched_folder(app, tmp_path):
     assert "picking up statements from" in text(get(app, "/upload")) and str(d) in text(get(app, "/upload"))
     bad = post(app, "/watch/set", {"folder": str(tmp_path / "nope")})
     assert bad.status == 303
+
+
+def test_card_paid_from_an_unimported_account_is_not_flagged(app, conn):
+    from ftracker import accounts as acc, reconcile
+    card = conn.execute("SELECT id FROM accounts WHERE kind = 'card' AND issuer != 'sheet' LIMIT 1").fetchone()[0]
+    assert "Which account pays each card" in text(get(app, "/setup"))
+    conn.execute("DELETE FROM transactions WHERE kind = 'card_payment'")           # no bank payment matches this card
+    conn.commit()
+    reconcile.match_card_payments(conn, 1); conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM discrepancies WHERE type = 'no_bank_payment' AND status = 'open'").fetchone()[0] >= 1
+    res = post(app, "/setup/card-payer", {"card": str(card), "payer": "external"})
+    assert res.status == 303
+    reconcile.match_card_payments(conn, 1); conn.commit()
+    assert conn.execute("SELECT COUNT(*) FROM discrepancies WHERE type = 'no_bank_payment' AND status = 'open'").fetchone()[0] == 0
+    acc.set_card_payer(conn, card, "")
+    assert conn.execute("SELECT pays_externally FROM accounts WHERE id = ?", (card,)).fetchone()[0] == 0

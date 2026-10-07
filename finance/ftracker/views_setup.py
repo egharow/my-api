@@ -179,6 +179,20 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                + _form(ctx, "/setup/category/rename", f"Rename {pick('old', True)} to <input name='new' placeholder='new name' required> <button class=quiet>Rename</button>", "row")
                + f'<details style="margin-top:12px"><summary>All categories ({len(cc)})</summary>'
                + charts.scroll(f'<table><thead><tr><th>Category</th><th>Type</th><th class="n">Lines</th></tr></thead><tbody>{cat_rows}</tbody></table>') + "</details></section>")
+    cards = conn.execute("""SELECT a.id, a.label, a.pays_from_account_id, a.pays_externally, o.name AS owner FROM accounts a
+                            LEFT JOIN owners o ON o.id = a.owner_id WHERE a.kind = 'card' AND a.active = 1 AND a.issuer != 'sheet'
+                            ORDER BY o.name, a.label""").fetchall()
+    payers = conn.execute("SELECT id, label FROM accounts WHERE kind IN ('bank','savings') AND active = 1 ORDER BY label").fetchall()
+    if cards:
+        rows = []
+        for c in cards:
+            opts = ('<option value="">not set (the app will ask for a matching bank payment)</option>'
+                    f'<option value="external"{" selected" if c["pays_externally"] else ""}>an account I do not import (for example a partner\'s Leumi, until I add it)</option>'
+                    + "".join(f'<option value="{p["id"]}"{" selected" if c["pays_from_account_id"] == p["id"] else ""}>{esc(p["label"])}</option>' for p in payers))
+            rows.append(_form(ctx, "/setup/card-payer", f'<input type="hidden" name="card" value="{c["id"]}"><b dir="auto">{esc(c["label"])}</b> '
+                              f'<span class="muted">{esc(c["owner"] or "")}</span> paid from <select name="payer">{opts}</select> <button class="quiet">Save</button>', "row"))
+        out.append('<section class="card" style="margin-top:12px"><h2>Which account pays each card</h2><p class="muted">The app matches each card '
+                   'statement to a bank payment. Say where each card is paid from, so it only looks in the right account.</p>' + "".join(rows) + "</section>")
     folder = watchfolder.get(conn)
     out.append('<section class="card" style="margin-top:12px"><h2>Statements from a folder (Google Drive)</h2>'
                '<p class="muted">Install Google Drive for desktop, save your statements into one Drive folder (from your phone too), '

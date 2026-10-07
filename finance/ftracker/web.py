@@ -357,6 +357,12 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/setup/card-payer":
+                try:
+                    accounts_mod.set_card_payer(conn, int(form["card"]), form.get("payer", ""))
+                except (ValueError, KeyError) as exc:
+                    return self._redirect("/setup", str(exc), err=True)
+                return self._redirect("/setup", "Saved")
             if path == "/watch/set":
                 try:
                     chosen = watchfolder.set_folder(conn, self.home, form.get("folder", ""))
