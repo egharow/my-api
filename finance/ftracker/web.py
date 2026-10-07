@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, uploads, views, views_home, views_setup, views_trends
+from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, watchfolder, uploads, views, views_home, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -112,6 +112,15 @@ class App:
                     fx.ensure_fresh(conn, self._today())      # at most every few hours; offline is fine
                 except Exception:
                     pass
+            if path in ("/", "/upload"):
+                try:
+                    note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()))
+                except Exception:
+                    import traceback
+                    print(traceback.format_exc())
+                    note = ""
+                if note and not ctx.flash:
+                    ctx.flash, ctx.flash_kind = note, "ok"
             res = self._get(conn, ctx, path, q)
             if flash:
                 res.headers.append(("Set-Cookie", "flash=; Max-Age=0; Path=/"))
@@ -348,6 +357,19 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/watch/set":
+                try:
+                    chosen = watchfolder.set_folder(conn, self.home, form.get("folder", ""))
+                except ValueError as exc:
+                    return self._redirect("/setup", str(exc), err=True)
+                note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
+                return self._redirect("/upload", f"Watching {chosen}. " + (note or "Nothing new to import yet."))
+            if path == "/watch/check":
+                note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
+                return self._redirect("/upload", note or "Nothing new in the folder.")
+            if path == "/watch/clear":
+                watchfolder.clear(conn)
+                return self._redirect("/setup", "No longer watching a folder.")
             if path == "/wealth/include":
                 shown = [int(x) for x in multi.get("shown", []) if x.isdigit()]
                 balances.set_in_wealth(conn, shown, {a for a in shown if form.get(f"inc_{a}") == "1"})

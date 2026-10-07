@@ -203,3 +203,14 @@ def test_category_drill_down_shows_merchants_and_every_payment(app):
     assert "What makes up Food" in t and "Every payment" in t and "Biggest merchants" in t
     month = text(get(app, "/spending?cat=Food&month=2025-03"))
     assert "2025-03 only" in month
+
+
+def test_settings_and_upload_pages_offer_the_watched_folder(app, tmp_path):
+    assert "Statements from a folder" in text(get(app, "/setup"))
+    assert "Google Drive folder" in text(get(app, "/upload")) or "picked up automatically" in text(get(app, "/upload"))
+    d = tmp_path / "gd"; d.mkdir()
+    res = post(app, "/watch/set", {"folder": str(d)})
+    assert res.status == 303
+    assert "Watching" in text(get(app, "/upload")) and str(d) in text(get(app, "/upload"))
+    bad = post(app, "/watch/set", {"folder": str(tmp_path / "nope")})
+    assert bad.status == 303

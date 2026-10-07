@@ -2,7 +2,7 @@
 import sqlite3
 from html import escape as esc
 
-from . import categorize, charts, sheet_import
+from . import categorize, charts, sheet_import, watchfolder
 from .views import Ctx, _form, layout
 
 DROP_JS = """
@@ -179,6 +179,16 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                + _form(ctx, "/setup/category/rename", f"Rename {pick('old', True)} to <input name='new' placeholder='new name' required> <button class=quiet>Rename</button>", "row")
                + f'<details style="margin-top:12px"><summary>All categories ({len(cc)})</summary>'
                + charts.scroll(f'<table><thead><tr><th>Category</th><th>Type</th><th class="n">Lines</th></tr></thead><tbody>{cat_rows}</tbody></table>') + "</details></section>")
+    folder = watchfolder.get(conn)
+    out.append('<section class="card" style="margin-top:12px"><h2>Statements from a folder (Google Drive)</h2>'
+               '<p class="muted">Install Google Drive for desktop, save your statements into one Drive folder (from your phone too), '
+               'and choose that folder here. The app picks up new files by itself and ticks the checklist. Files stay in Drive; '
+               'only statements go through there, never your data folder.</p>'
+               + (f'<p>Watching <code>{esc(folder)}</code></p><p class="muted">{esc(watchfolder.last_result(conn))}</p>'
+                  + _form(ctx, "/watch/check", "<button>Check it now</button>", "inline") + " "
+                  + _form(ctx, "/watch/clear", '<button class="quiet">Stop watching</button>', "inline") if folder else "")
+               + _form(ctx, "/watch/set", f'<input name="folder" style="width:100%;max-width:520px" placeholder="G:\\My Drive\\Statements" '
+                       f'value="{esc(folder or "")}" required> <button>{"Change folder" if folder else "Watch this folder"}</button>', "row") + "</section>")
     shortcut = (_form(ctx, "/setup/shortcut", "<button>Put an icon on my desktop</button>", "inline") if ctx.can_shortcut else "")
     out.append('<section class="card" style="margin-top:12px"><h2>This app</h2>'
                f'<p>Your data lives in <code>{esc(ctx.data_root)}</code> on this computer. Statements you drop in are filed under <code>archive</code> there, and a backup is made before every import.</p>'

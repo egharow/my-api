@@ -2,7 +2,7 @@
 import sqlite3
 from html import escape as esc
 
-from . import balances, charts, expected, goals, summary
+from . import balances, charts, expected, goals, summary, watchfolder
 from .charts import money
 from .views import Ctx, _form, _goal_card, _month_window, _net_worth_series, _tile, counts, layout
 from .views_trends import networth_body, trends_body
@@ -92,10 +92,14 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     done = cl["done"] == cl["total"]
     head = (f'<div class="banner" style="border-color:var(--good)"><b>Everything on the list is in.</b></div>' if done else
             f'<p class="muted">{cl["done"]} of {cl["total"]} received. Drop a file and its box is ticked automatically.</p>')
+    folder = watchfolder.get(conn)
+    watch = (f'<p class="muted">Also picking up statements from <code>{esc(folder)}</code>. ' + _form(ctx, "/watch/check", '<button class="quiet">Check it now</button>', "inline") + "</p>"
+             if folder else '<p class="muted">Tip: statements saved to a Google Drive folder can be picked up automatically. '
+             '<a href="/setup">Set it up in Settings</a>.</p>')
     nxt = (f'<p><a href="/review"><button>Next: confirm {c["review"]} categories</button></a></p>' if c["review"] else
            '<p><a href="/"><button class="quiet">Back to this round</button></a></p>')
     from .views import sheet_body
-    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}<section class="card">{head}{render_checklist(cl)}</section>'
+    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}<section class="card">{head}{render_checklist(cl)}</section>'
             f'<div style="margin-top:12px">{nxt}</div>'
             f'<section style="margin-top:24px"><h2>Google Sheet (optional)</h2>{sheet_body(conn, ctx, "/upload")}</section>')
     return layout(conn, ctx, "/upload", "Upload", body)
