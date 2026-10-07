@@ -94,6 +94,25 @@ def _has_statement(conn, account_id: int, y: int, m: int, covered: set[str]) -> 
     return "already in your history" if key in covered else None
 
 
+def _is_optional(conn, a) -> bool:
+    """True when this account matches one of the optional sources (for example Shir's Leumi account)."""
+    owner = conn.execute("SELECT name FROM owners WHERE id = ?", (a["owner_id"],)).fetchone()
+    owner = owner[0] if owner else None
+    for src in EXTRA_SOURCES:
+        if not src["optional"] or src["kind"] != a["kind"]:
+            continue
+        if src.get("issuer") and a["issuer"] != src["issuer"]:
+            continue
+        if src.get("owner") and owner != src["owner"]:
+            continue
+        if src.get("label_contains") and src["label_contains"] not in a["label"]:
+            continue
+        if src.get("last4") and a["last4"] != src["last4"]:
+            continue
+        return True
+    return False
+
+
 def checklist(conn: sqlite3.Connection, today: str) -> dict:
     """Everything that should be uploaded or entered for the current round, each with a done/to-do state.
 
@@ -131,7 +150,7 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
                     cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "waiting",
                                   "detail": f"not due yet, billed around {due.isoformat()}"})
                 else:
-                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "todo",
+                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "optional" if _is_optional(conn, a) else "todo",
                                   "detail": f"billed around {due.isoformat()}"})
         else:
             ends = [r[0] for r in conn.execute(
@@ -140,7 +159,7 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
                 continue
             last = date.fromisoformat(max(ends))
             fresh = (now_d - last).days <= BANK_STALE_DAYS
-            banks.append({"label": a["label"], "status": "done" if fresh else "todo",
+            banks.append({"label": a["label"], "status": "done" if fresh else ("optional" if _is_optional(conn, a) else "todo"),
                           "detail": f"covers up to {last.isoformat()}" if fresh else f"latest statement ends {last.isoformat()}"})
 
     for src in EXTRA_SOURCES:

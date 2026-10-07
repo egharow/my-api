@@ -248,3 +248,21 @@ def test_saved_card_payer_rules_apply_without_overriding_a_choice(conn):
     reconcile.apply_card_payer_rules(conn); conn.commit()
     row = conn.execute("SELECT pays_from_account_id, pays_externally FROM accounts WHERE id = ?", (c45["id"],)).fetchone()
     assert (row["pays_from_account_id"], row["pays_externally"]) == (None, 1)         # the later choice stands
+
+
+def test_shirs_leumi_stays_optional_after_it_is_imported_and_then_pays_card_6201(conn):
+    from ftracker import accounts as acc, expected, reconcile
+    conn.execute("INSERT INTO owners (name) VALUES ('Shir')") if not conn.execute("SELECT 1 FROM owners WHERE name='Shir'").fetchone() else None
+    shir = conn.execute("SELECT id FROM owners WHERE name = 'Shir'").fetchone()[0]
+    conn.execute("INSERT INTO accounts (kind, issuer, label, last4, owner_id, currency, created_at) VALUES ('card','isracard','Isracard 6201','6201',?,'ILS','x')", (shir,))
+    conn.commit()
+    reconcile.apply_card_payer_rules(conn); conn.commit()
+    assert conn.execute("SELECT pays_externally FROM accounts WHERE last4 = '6201'").fetchone()[0] == 1      # her Leumi is not imported yet
+    conn.execute("INSERT INTO accounts (kind, issuer, label, last4, owner_id, currency, created_at) VALUES ('bank','leumi','Leumi 1234','1234',?,'ILS','x')", (shir,))
+    bank = conn.execute("SELECT id FROM accounts WHERE last4 = '1234'").fetchone()[0]
+    conn.execute("INSERT INTO source_files (sha256, original_name, issuer, file_kind, archived_path, imported_at, batch_id) VALUES ('h','f','leumi','bank_statement','p','x',NULL)") if False else None
+    conn.commit()
+    reconcile.apply_card_payer_rules(conn); conn.commit()
+    row = conn.execute("SELECT pays_from_account_id, pays_externally FROM accounts WHERE last4 = '6201'").fetchone()
+    assert (row["pays_from_account_id"], row["pays_externally"]) == (bank, 0)                            # it now pays the card
+    assert expected._is_optional(conn, conn.execute("SELECT * FROM accounts WHERE id = ?", (bank,)).fetchone())

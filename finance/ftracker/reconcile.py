@@ -61,8 +61,19 @@ def apply_card_payer_rules(conn: sqlite3.Connection) -> None:
     except ValueError:
         return
     for last4, target in rules.items():
-        for card in conn.execute("""SELECT id FROM accounts WHERE kind = 'card' AND last4 = ? AND pays_from_account_id IS NULL
-                                    AND pays_externally = 0""", (last4,)).fetchall():
+        cards = conn.execute("SELECT id, pays_from_account_id, pays_externally FROM accounts WHERE kind = 'card' AND last4 = ?", (last4,)).fetchall()
+        for card in cards:
+            if target.startswith("leumi:"):            # that person's Leumi account once it has been imported, else not imported
+                owner = target.split(":", 1)[1]
+                bank = conn.execute("""SELECT a.id FROM accounts a JOIN owners o ON o.id = a.owner_id WHERE a.kind = 'bank' AND a.issuer = 'leumi'
+                                       AND a.active = 1 AND o.name = ? ORDER BY a.id LIMIT 1""", (owner,)).fetchone()
+                if bank and (card["pays_from_account_id"] is None):
+                    conn.execute("UPDATE accounts SET pays_from_account_id = ?, pays_externally = 0 WHERE id = ?", (bank["id"], card["id"]))
+                elif not bank and card["pays_from_account_id"] is None and not card["pays_externally"]:
+                    conn.execute("UPDATE accounts SET pays_externally = 1 WHERE id = ?", (card["id"],))
+                continue
+            if card["pays_from_account_id"] is not None or card["pays_externally"]:
+                continue
             if target == "external":
                 conn.execute("UPDATE accounts SET pays_externally = 1 WHERE id = ?", (card["id"],))
                 continue
