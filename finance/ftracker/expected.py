@@ -145,12 +145,12 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
                 got = _has_statement(conn, a["id"], y, m, covered)
                 due = date(y, m, min(day, 28))
                 if got:
-                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "done", "detail": got})
+                    cards.append({"label": a["label"], "month": f"{y:04d}-{m:02d}", "status": "done", "detail": got})
                 elif due > now_d:
-                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "waiting",
-                                  "detail": f"not due yet, billed around {due.isoformat()}"})
+                    cards.append({"label": a["label"], "month": f"{y:04d}-{m:02d}", "status": "waiting",
+                                  "detail": f"billed around {due.isoformat()}"})
                 else:
-                    cards.append({"label": f"{a['label']} · {_month_label(y, m)}", "status": "optional" if _is_optional(conn, a) else "todo",
+                    cards.append({"label": a["label"], "month": f"{y:04d}-{m:02d}", "status": "optional" if _is_optional(conn, a) else "todo",
                                   "detail": f"billed around {due.isoformat()}"})
         else:
             ends = [r[0] for r in conn.execute(
@@ -197,7 +197,17 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
     groups = [{"title": "Card statements", "items": cards}, {"title": "Bank statements", "items": banks},
               {"title": "Numbers you type", "items": other}]
     counted = [i for g in groups for i in g["items"] if i["status"] in ("done", "todo")]
-    return {"groups": groups, "done": sum(1 for i in counted if i["status"] == "done"), "total": len(counted)}
+    cur_key, prev_key = f"{now_d.year:04d}-{now_d.month:02d}", f"{prev[0]:04d}-{prev[1]:02d}"
+    by_month = []
+    for key, label in ((cur_key, _month_label(now_d.year, now_d.month)), (prev_key, _month_label(*prev))):
+        gs = [{"title": "Card statements", "items": [i for i in cards if i.get("month", cur_key) == key]},
+              {"title": "Bank statements", "items": banks if key == cur_key else []},
+              {"title": "Numbers you type", "items": other if key == cur_key else []}]
+        gs = [g for g in gs if g["items"]]
+        items = [i for g in gs for i in g["items"] if i["status"] in ("done", "todo")]
+        by_month.append({"key": key, "label": label, "groups": gs, "done": sum(1 for i in items if i["status"] == "done"), "total": len(items)})
+    return {"groups": groups, "by_month": [b for b in by_month if b["groups"]],
+            "done": sum(1 for i in counted if i["status"] == "done"), "total": len(counted)}
 
 
 def _covered(spans: list[tuple[date, date]], start: date, end: date) -> bool:
@@ -258,7 +268,7 @@ def history(conn: sqlite3.Connection, today: str, max_months: int = 24) -> list[
                 if (y, m) < firsts:
                     continue
                 if (y, m) in have:
-                    items.append({"label": a["label"], "status": "done", "detail": "received"})
+                    items.append({"label": a["label"], "status": "done", "detail": "statement imported"})
                 elif key in hist:
                     items.append({"label": a["label"], "status": "done", "detail": "already in your history"})
                 else:

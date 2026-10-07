@@ -11,24 +11,33 @@ MARK = {"done": ("✔", "good", "Received"), "todo": ("☐", "serious", "Needed"
         "optional": ("○", "muted", "Optional")}
 
 
+def _group_html(g: dict) -> str:
+    rows = []
+    for i in g["items"]:
+        icon, tone, word = MARK[i["status"]]
+        name = f'<a href="{esc(i["link"])}">{esc(i["label"])}</a>' if i.get("link") and i["status"] == "todo" else esc(i["label"])
+        detail = f'{esc(word)} · {esc(i["detail"])}'
+        if i.get("children"):
+            inner = "".join(
+                f'<div class="row" style="padding:2px 0"><span class="chip {MARK[k["status"]][1]}"><b aria-hidden="true">{MARK[k["status"]][0]}</b></span>'
+                f'<span dir="auto">{esc(k["label"])}</span><span class="muted">{esc(k["detail"])}</span></div>' for k in i["children"])
+            detail = f'<details{" open" if i["status"] == "todo" else ""}><summary>{detail} · show which</summary>{inner}</details>'
+        rows.append(f'<tr><td style="width:2em"><span class="chip {tone}"><b aria-hidden="true">{icon}</b></span></td>'
+                    f'<td dir="auto">{name}</td><td class="muted">{detail}</td></tr>')
+    return f'<h3 style="margin:10px 0 4px">{esc(g["title"])}</h3><table><tbody>{"".join(rows)}</tbody></table>'
+
+
 def render_checklist(cl: dict) -> str:
+    """One collapsible block per month, the current month first, so September and October are never mixed."""
     out = []
-    for g in cl["groups"]:
-        if not g["items"]:
-            continue
-        rows = []
-        for i in g["items"]:
-            icon, tone, word = MARK[i["status"]]
-            name = f'<a href="{esc(i["link"])}">{esc(i["label"])}</a>' if i.get("link") and i["status"] == "todo" else esc(i["label"])
-            detail = f'{esc(word)} · {esc(i["detail"])}'
-            if i.get("children"):
-                inner = "".join(
-                    f'<div class="row" style="padding:2px 0"><span class="chip {MARK[k["status"]][1]}"><b aria-hidden="true">{MARK[k["status"]][0]}</b></span>'
-                    f'<span dir="auto">{esc(k["label"])}</span><span class="muted">{esc(k["detail"])}</span></div>' for k in i["children"])
-                detail = (f'<details{" open" if i["status"] == "todo" else ""}><summary>{detail} · show which</summary>{inner}</details>')
-            rows.append(f'<tr><td style="width:2em"><span class="chip {tone}"><b aria-hidden="true">{icon}</b></span></td>'
-                        f'<td dir="auto">{name}</td><td class="muted">{detail}</td></tr>')
-        out.append(f'<h2 style="margin-top:12px">{esc(g["title"])}</h2><table><tbody>{"".join(rows)}</tbody></table>')
+    for n, mth in enumerate(cl["by_month"]):
+        complete = mth["done"] == mth["total"]
+        chip = ('<span class="chip good"><b aria-hidden="true">✔</b></span>' if complete
+                else '<span class="chip serious"><b aria-hidden="true">☐</b></span>')
+        opened = n == 0 or not complete
+        out.append(f'<details{" open" if opened else ""} style="padding:6px 0;border-bottom:1px solid var(--grid)"><summary style="font-size:16px">{chip} '
+                   f'<b>{esc(mth["label"])}</b> <span class="muted">· {mth["done"]} of {mth["total"]} received</span></summary>'
+                   + "".join(_group_html(g) for g in mth["groups"]) + "</details>")
     return "".join(out)
 
 
