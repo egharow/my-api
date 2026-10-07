@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from . import importer
+from .parsers.detect import PARSERS_VERSION
 from .config import Home
 
 KEY = "watch_folder"
@@ -49,8 +50,14 @@ def last_result(conn: sqlite3.Connection) -> str:
 
 
 def _seen(conn) -> set[str]:
+    """Files already looked at. After a reader is added or improved the list is forgotten, so earlier rejects are retried."""
     row = conn.execute("SELECT value FROM settings WHERE key = ?", (SEEN_KEY,)).fetchone()
-    return set(json.loads(row[0])) if row else set()
+    if not row:
+        return set()
+    data = json.loads(row[0])
+    if isinstance(data, dict) and data.get("v") == PARSERS_VERSION:
+        return set(data.get("hashes", []))
+    return set()
 
 
 def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force: bool = False) -> str:
@@ -66,7 +73,7 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
         msg = f"The watched folder {folder} is not available right now (is Google Drive running?)."
         _save(conn, msg)
         return msg
-    seen = _seen(conn)
+    seen = set() if force else _seen(conn)       # "Check it now" tries everything not yet imported
     fresh: list[Path] = []
     for p in sorted(root.iterdir()):
         if not p.is_file() or p.suffix.lower() not in SUPPORTED or p.name.startswith(("~$", ".")):
@@ -89,7 +96,7 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
             n += 1
         shutil.copy2(p, dest)
     report = importer.import_inbox(home, conn, today or date.today())
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (SEEN_KEY, json.dumps(sorted(seen))))
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (SEEN_KEY, json.dumps({"v": PARSERS_VERSION, "hashes": sorted(seen)})))
     imported = report.imported
     bad = [f for f in report.files if f.status == "unrecognised"]
     msg = f"{len(imported)} new statement(s) imported from your folder"

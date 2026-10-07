@@ -47,3 +47,20 @@ def test_bad_folders_are_refused(conn, home, tmp_path):
     home.ensure()
     with pytest.raises(ValueError):
         watchfolder.set_folder(conn, home, str(home.inbox))
+
+
+def test_files_rejected_earlier_are_retried_after_a_reader_update_or_check_now(conn, home, drive, monkeypatch):
+    f = drive / "isra.xlsx"; f.write_bytes(b"statement-1"); _age(f)
+    watchfolder.set_folder(conn, home, str(drive))
+    real = importer.parse_file
+
+    def unreadable(path):
+        raise importer.Unrecognised("not a known layout") if hasattr(importer, "Unrecognised") else ValueError("x")
+    monkeypatch.setattr(importer, "parse_file", unreadable)
+    first = watchfolder.scan(conn, home, date(2026, 10, 5), force=True)
+    assert "not recognised" in first
+    assert watchfolder.scan(conn, home, date(2026, 10, 5)) == ""                # remembered: not retried every few seconds
+    monkeypatch.setattr(importer, "parse_file", real)
+    watchfolder._last_scan["t"] = 0.0
+    monkeypatch.setattr(watchfolder, "PARSERS_VERSION", "newer")
+    assert "1 new statement(s) imported" in watchfolder.scan(conn, home, date(2026, 10, 5))     # a reader update retries it

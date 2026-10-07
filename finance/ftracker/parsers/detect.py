@@ -4,6 +4,10 @@ from . import amex, isracard, isracard_pdf, leumi_pdf
 from .base import ParseError, ParsedFile
 
 
+# Bump this when a reader is added or improved, so files that could not be read before are tried again.
+PARSERS_VERSION = "2"
+
+
 class Unrecognised(Exception):
     pass
 
