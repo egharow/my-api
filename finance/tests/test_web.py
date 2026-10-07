@@ -230,3 +230,21 @@ def test_card_paid_from_an_unimported_account_is_not_flagged(app, conn):
     assert conn.execute("SELECT COUNT(*) FROM discrepancies WHERE type = 'no_bank_payment' AND status = 'open'").fetchone()[0] == 0
     acc.set_card_payer(conn, card, "")
     assert conn.execute("SELECT pays_externally FROM accounts WHERE id = ?", (card,)).fetchone()[0] == 0
+
+
+def test_saved_card_payer_rules_apply_without_overriding_a_choice(conn):
+    from ftracker import accounts as acc, reconcile
+    for last4 in ("6045", "6201"):
+        conn.execute("INSERT INTO accounts (kind, issuer, label, last4, currency, created_at) VALUES ('card','isracard',?,?,'ILS','x')",
+                     (f"Isracard {last4}", last4))
+    conn.execute("INSERT INTO accounts (kind, issuer, label, currency, created_at) VALUES ('savings','onezero','One Zero','ILS','x')")
+    zero = conn.execute("SELECT id FROM accounts WHERE label = 'One Zero'").fetchone()[0]
+    conn.commit()
+    reconcile.apply_card_payer_rules(conn); conn.commit()
+    c45 = conn.execute("SELECT id, pays_from_account_id FROM accounts WHERE last4 = '6045'").fetchone()
+    c62 = conn.execute("SELECT pays_externally FROM accounts WHERE last4 = '6201'").fetchone()
+    assert c45["pays_from_account_id"] == zero and c62["pays_externally"] == 1
+    acc.set_card_payer(conn, c45["id"], "external")
+    reconcile.apply_card_payer_rules(conn); conn.commit()
+    row = conn.execute("SELECT pays_from_account_id, pays_externally FROM accounts WHERE id = ?", (c45["id"],)).fetchone()
+    assert (row["pays_from_account_id"], row["pays_externally"]) == (None, 1)         # the later choice stands

@@ -1,5 +1,6 @@
 """Cross-checks run after every import: card payments vs card statements, bank fee refunds,
 balance chains, large items and transfers with no destination."""
+import json
 import sqlite3
 from collections import Counter
 from datetime import date, timedelta
@@ -49,7 +50,30 @@ def _money(x: float) -> str:
     return f"₪{abs(x):,.2f}"
 
 
+def apply_card_payer_rules(conn: sqlite3.Connection) -> None:
+    """Fill in who pays a card from the saved rules (last four digits -> an account label, or 'external').
+    A card whose payer you already chose in Settings is left alone."""
+    row = conn.execute("SELECT value FROM settings WHERE key = 'card_payers'").fetchone()
+    if not row:
+        return
+    try:
+        rules = json.loads(row[0])
+    except ValueError:
+        return
+    for last4, target in rules.items():
+        for card in conn.execute("""SELECT id FROM accounts WHERE kind = 'card' AND last4 = ? AND pays_from_account_id IS NULL
+                                    AND pays_externally = 0""", (last4,)).fetchall():
+            if target == "external":
+                conn.execute("UPDATE accounts SET pays_externally = 1 WHERE id = ?", (card["id"],))
+                continue
+            payer = conn.execute("""SELECT id FROM accounts WHERE active = 1 AND kind IN ('bank','savings') AND label LIKE ?
+                                    ORDER BY (kind = 'bank') DESC, id LIMIT 1""", (f"%{target}%",)).fetchone()
+            if payer:
+                conn.execute("UPDATE accounts SET pays_from_account_id = ? WHERE id = ?", (payer["id"], card["id"]))
+
+
 def match_card_payments(conn: sqlite3.Connection, batch_id: int) -> None:
+    apply_card_payer_rules(conn)
     # A line that is no longer a card payment (for example after a rule change) cannot be missing a statement.
     for d in conn.execute("""SELECT d.fingerprint FROM discrepancies d JOIN transactions t ON t.id = d.subject_id
                              WHERE d.type IN ('missing_statement','payment_mismatch') AND d.status = 'open'
