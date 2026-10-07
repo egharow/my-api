@@ -6,6 +6,7 @@ from html import escape as esc
 from datetime import date
 
 from . import balances, charts, commits, discrepancies, expected, fx, goals, reconcile, sheetsync, summary
+from . import BUILD
 from .charts import money
 
 
@@ -110,7 +111,7 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{esc(title)} · Finance</title><style>{CSS}</style></head><body><header><nav>" + "".join(links)
             + "<span class=\"sp\"></span>" + who_form + quit_form
-            + f"</nav></header><main>{flash}{body}</main><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
+            + f"</nav></header><main>{flash}{body}</main><p class=\"muted\" style=\"text-align:center;font-size:12px\">Version {esc(BUILD)}</p><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
 
 
 def _tile(label: str, value: str, detail: str = "") -> str:

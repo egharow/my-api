@@ -75,18 +75,32 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
         return msg
     seen = set() if force else _seen(conn)       # "Check it now" tries everything not yet imported
     fresh: list[Path] = []
+    stats = {"files": 0, "known": 0, "syncing": 0, "other": 0}
     for p in sorted(root.iterdir()):
-        if not p.is_file() or p.suffix.lower() not in SUPPORTED or p.name.startswith(("~$", ".")):
+        if not p.is_file() or p.name.startswith(("~$", ".")):
             continue
+        if p.suffix.lower() not in SUPPORTED:
+            stats["other"] += 1
+            continue
+        stats["files"] += 1
         if time.time() - p.stat().st_mtime < SETTLE_SECONDS:
+            stats["syncing"] += 1
             continue
         digest = importer.sha256(p)
         if digest in seen or conn.execute("SELECT 1 FROM source_files WHERE sha256 = ?", (digest,)).fetchone():
+            stats["known"] += 1
             continue
         fresh.append(p)
         seen.add(digest)
     if not fresh:
-        return ""
+        if not force:
+            return ""
+        parts = [f"{stats['files']} statement file(s) in the folder", f"{stats['known']} already imported"]
+        if stats["syncing"]:
+            parts.append(f"{stats['syncing']} still syncing")
+        if stats["other"]:
+            parts.append(f"{stats['other']} other file(s) ignored")
+        return "Nothing new: " + ", ".join(parts) + "."
     home.inbox.mkdir(parents=True, exist_ok=True)
     for p in fresh:
         dest = home.inbox / p.name
