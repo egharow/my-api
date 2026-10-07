@@ -32,6 +32,22 @@ def render_checklist(cl: dict) -> str:
     return "".join(out)
 
 
+def render_history(months: list[dict]) -> str:
+    if not months:
+        return ""
+    blocks = []
+    for mth in months:
+        complete = mth["done"] == mth["total"]
+        chip = ('<span class="chip good"><b aria-hidden="true">✔</b></span>' if complete
+                else '<span class="chip serious"><b aria-hidden="true">☐</b></span>')
+        rows = "".join(
+            f'<tr><td style="width:2em"><span class="chip {MARK[i["status"]][1]}"><b aria-hidden="true">{MARK[i["status"]][0]}</b></span></td>'
+            f'<td dir="auto">{esc(i["label"])}</td><td class="muted">{esc(MARK[i["status"]][2])} · {esc(i["detail"])}</td></tr>' for i in mth["items"])
+        blocks.append(f'<details{"" if complete else " open"} style="padding:6px 0;border-bottom:1px solid var(--grid)"><summary>{chip} <b>{esc(mth["label"])}</b> '
+                      f'<span class="muted">· {mth["done"]} of {mth["total"]} received</span></summary><table><tbody>{rows}</tbody></table></details>')
+    return f'<section class="card" style="margin-top:16px"><h2>Earlier months</h2>{"".join(blocks)}</section>'
+
+
 def _step(n: int, title: str, state: str, detail: str, href: str, button: str) -> str:
     icon, tone = {"done": ("✔", "good"), "todo": ("☐", "serious"), "idle": ("○", "muted")}[state]
     return (f'<div class="item"><div class="row"><span class="chip {tone}"><b aria-hidden="true">{icon}</b></span>'
@@ -99,7 +115,7 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     nxt = (f'<p><a href="/review"><button>Next: confirm {c["review"]} categories</button></a></p>' if c["review"] else
            '<p><a href="/"><button class="quiet">Back to this round</button></a></p>')
     from .views import sheet_body
-    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}<section class="card">{head}{render_checklist(cl)}</section>'
+    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}<section class="card">{head}{render_checklist(cl)}</section>{render_history(expected.history(conn, ctx.today))}'
             f'<div style="margin-top:12px">{nxt}</div>'
             f'<section style="margin-top:24px"><h2>Google Sheet (optional)</h2>{sheet_body(conn, ctx, "/upload")}</section>')
     return layout(conn, ctx, "/upload", "Upload", body)

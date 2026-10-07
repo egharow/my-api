@@ -198,3 +198,83 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
               {"title": "Numbers you type", "items": other}]
     counted = [i for g in groups for i in g["items"] if i["status"] in ("done", "todo")]
     return {"groups": groups, "done": sum(1 for i in counted if i["status"] == "done"), "total": len(counted)}
+
+
+def _covered(spans: list[tuple[date, date]], start: date, end: date) -> bool:
+    """True when the statement periods together cover every day from start to end."""
+    day = start
+    for s, e in sorted(spans):
+        if s > day:
+            return False
+        day = max(day, e + timedelta(days=1))
+        if day > end:
+            return True
+    return day > end
+
+
+def history(conn: sqlite3.Connection, today: str, max_months: int = 24) -> list[dict]:
+    """The checklist for the months before the last two, newest first, so you can see what is complete and what has a gap."""
+    now_d = date.fromisoformat(today)
+    row = conn.execute("SELECT value FROM settings WHERE key = 'history_months'").fetchone()
+    hist = set(json.loads(row[0])) if row else set()
+    newest = (now_d.year, now_d.month - 2)
+    while newest[1] < 1:
+        newest = (newest[0] - 1, newest[1] + 12)
+    accounts = conn.execute("SELECT * FROM accounts WHERE kind IN ('card','bank') AND active = 1 AND issuer != 'sheet' ORDER BY kind, label").fetchall()
+    info = []
+    first_month = None
+    for a in accounts:
+        if a["kind"] == "card":
+            have = {(date.fromisoformat(r[0]).year, date.fromisoformat(r[0]).month) for r in conn.execute(
+                "SELECT billing_date FROM statements WHERE account_id = ? AND billing_date IS NOT NULL", (a["id"],))}
+            if not have:
+                continue
+            info.append((a, have, None))
+            first_month = min(first_month or min(have), min(have))
+        else:
+            spans = [(date.fromisoformat(r[0]), date.fromisoformat(r[1])) for r in conn.execute(
+                "SELECT period_start, period_end FROM statements WHERE account_id = ? AND period_start IS NOT NULL", (a["id"],))]
+            if not spans:
+                continue
+            info.append((a, None, spans))
+            fm = (min(s for s, _ in spans).year, min(s for s, _ in spans).month)
+            first_month = min(first_month or fm, fm)
+    if not first_month:
+        return []
+    months, (y, m) = [], newest
+    while (y, m) >= first_month and len(months) < max_months:
+        months.append((y, m))
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    out = []
+    for y, m in months:
+        key = f"{y:04d}-{m:02d}"
+        start = date(y, m, 1)
+        end = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
+        items = []
+        for a, have, spans in info:
+            optional = _is_optional(conn, a)
+            if have is not None:
+                firsts = min(have)
+                if (y, m) < firsts:
+                    continue
+                if (y, m) in have:
+                    items.append({"label": a["label"], "status": "done", "detail": "received"})
+                elif key in hist:
+                    items.append({"label": a["label"], "status": "done", "detail": "already in your history"})
+                else:
+                    items.append({"label": a["label"], "status": "optional" if optional else "todo", "detail": "no statement for this month"})
+            else:
+                first = min(s for s, _ in spans)
+                if end < first:
+                    continue
+                if key in hist and start < first:
+                    items.append({"label": a["label"], "status": "done", "detail": "already in your history"})
+                elif _covered(spans, start + timedelta(days=4), end - timedelta(days=4)):
+                    items.append({"label": a["label"], "status": "done", "detail": "covered by a statement"})
+                else:
+                    items.append({"label": a["label"], "status": "optional" if optional else "todo", "detail": "gap in the bank statements"})
+        if items:
+            counted = [i for i in items if i["status"] in ("done", "todo")]
+            out.append({"key": key, "label": _month_label(y, m), "items": items,
+                        "done": sum(1 for i in counted if i["status"] == "done"), "total": len(counted)})
+    return out

@@ -266,3 +266,10 @@ def test_shirs_leumi_stays_optional_after_it_is_imported_and_then_pays_card_6201
     row = conn.execute("SELECT pays_from_account_id, pays_externally FROM accounts WHERE last4 = '6201'").fetchone()
     assert (row["pays_from_account_id"], row["pays_externally"]) == (bank, 0)                            # it now pays the card
     assert expected._is_optional(conn, conn.execute("SELECT * FROM accounts WHERE id = ?", (bank,)).fetchone())
+
+
+def test_earlier_months_are_listed_with_gaps(app, conn):
+    from ftracker import expected
+    months = expected.history(conn, "2026-12-20")
+    assert months and months[0]["key"] == "2026-10"                     # newest first, the last two months stay in the main list
+    assert any(i["status"] == "todo" for m in months for i in m["items"])
