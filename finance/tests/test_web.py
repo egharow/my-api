@@ -211,6 +211,6 @@ def test_settings_and_upload_pages_offer_the_watched_folder(app, tmp_path):
     d = tmp_path / "gd"; d.mkdir()
     res = post(app, "/watch/set", {"folder": str(d)})
     assert res.status == 303
-    assert "Watching" in text(get(app, "/upload")) and str(d) in text(get(app, "/upload"))
+    assert "picking up statements from" in text(get(app, "/upload")) and str(d) in text(get(app, "/upload"))
     bad = post(app, "/watch/set", {"folder": str(tmp_path / "nope")})
     assert bad.status == 303
