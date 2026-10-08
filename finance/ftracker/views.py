@@ -1,4 +1,5 @@
 """HTML pages. Every function takes an open connection and returns a string, so they are easy to test."""
+import json
 import sqlite3
 from dataclasses import dataclass, field
 from html import escape as esc
@@ -276,7 +277,11 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
                   ROUND(SUM(-t.amount), 2) AS total, c.name AS proposed, MIN(t.proposal_basis) AS basis
            FROM transactions t JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
            WHERE t.category_status = 'proposed' AND b.status != 'committed'
-           GROUP BY t.description_norm, c.name ORDER BY ABS(SUM(t.amount)) DESC LIMIT 300""").fetchall()
+           GROUP BY t.description_norm, c.name ORDER BY ABS(SUM(t.amount)) DESC""").fetchall()
+    n_match = sum(1 for g in groups if g["proposed"] != "Uncategorised")
+    n_none = len(groups) - n_match
+    show = q.get("show") if q.get("show") in ("match", "none", "all") else ("match" if n_match else "all")
+    groups = [g for g in groups if show == "all" or (g["proposed"] != "Uncategorised") == (show == "match")][:300]
     cats = conn.execute("SELECT name FROM categories WHERE name != 'Uncategorised' ORDER BY kind, name").fetchall()
     lines_by: dict[tuple, list] = {}
     for r in conn.execute(
@@ -288,8 +293,11 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     out = ["<h1>Review categories</h1>",
            '<p class="muted">Each line is a merchant. The proposed category is a suggestion: approve it or pick another. '
            "Tick “remember” and the app will use your choice for this merchant from now on.</p>"]
+    tab = lambda key, label, n: (f'<a href="/review?show={key}"{" style=font-weight:700" if show == key else ""}>{label} ({n})</a>')
+    out.append(f'<p>{tab("match", "With a suggestion", n_match)} &nbsp;·&nbsp; {tab("none", "No suggestion yet", n_none)} &nbsp;·&nbsp; '
+               f'{tab("all", "Everything", n_match + n_none)}</p>')
     if not groups:
-        out.append('<div class="card">Nothing is waiting for approval.</div>')
+        out.append('<div class="card">Nothing is waiting for approval in this view.</div>')
     rows = []
     for g in groups:
         opts = "".join(f'<option{" selected" if c[0] == g["proposed"] else ""}>{esc(c[0])}</option>' for c in cats)
@@ -305,12 +313,26 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
             body = "".join(f'<tr><td>{esc(l["txn_date"])}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
                            f'<td class="n">{l["spent"]:,.2f}</td></tr>' for l in lines[:100])
             more = f'<small>Showing the newest 100 of {len(lines)}.</small>' if len(lines) > 100 else ""
-            detail = (f'<details><summary class="muted">show the {len(lines)} line(s)</summary><table><thead><tr><th>Date</th><th>Description</th>'
+            detail = (f'<details dir="ltr"><summary class="muted">show the {len(lines)} line(s)</summary><table><thead><tr><th>Date</th><th>Description</th>'
                       f'<th>Account</th><th class="n">Amount ₪</th></tr></thead><tbody>{body}</tbody></table>{more}</details>')
-        rows.append(f'<tr><td dir="auto">{esc(g["description"])}{detail}</td><td class="n">{g["n"]}</td><td class="n">{esc(flow)}</td>'
+        pick = esc(json.dumps([g["key"], g["proposed"]], ensure_ascii=False))
+        rows.append(f'<tr><td><input type="checkbox" form="bulk" name="sel" value="{pick}" class="sel" data-ok="{0 if g["proposed"] == "Uncategorised" else 1}" '
+                    f'aria-label="Select {esc(g["description"])}"></td>'
+                    f'<td dir="auto">{esc(g["description"])}{detail}</td><td class="n">{g["n"]}</td><td class="n">{esc(flow)}</td>'
                     f'<td>{form}<small>{esc(g["basis"] or "")}</small></td></tr>')
     if rows:
-        out.append('<div class="card"><div style="overflow-x:auto"><table><thead><tr><th>Merchant</th><th class="n">Lines</th><th class="n">Money</th>'
+        bulk_opts = '<option value="">each one\'s proposed category</option>' + "".join(f"<option>{esc(c[0])}</option>" for c in cats)
+        out.append('<div class="card" style="margin-bottom:12px"><b>Approve several at once</b> '
+                   '<form id="bulk" method="post" action="/approve/bulk" class="row" style="margin-top:6px">'
+                   f'<input type="hidden" name="csrf" value="{esc(ctx.csrf)}">'
+                   f'<select name="category">{bulk_opts}</select> '
+                   '<label><input type="checkbox" name="learn" value="1" checked> remember</label> '
+                   '<button>Approve ticked</button> '
+                   '<button type="button" class="quiet" onclick="document.querySelectorAll(\'.sel\').forEach(function(c){c.checked=c.dataset.ok==\'1\'})">Tick all shown</button> '
+                   '<button type="button" class="quiet" onclick="document.querySelectorAll(\'.sel\').forEach(function(c){c.checked=false})">Clear</button>'
+                   '</form><p class="muted" style="margin:6px 0 0">Tick merchants in the list, then approve them together. '
+                   "Leave the category on “each one's proposed category” to accept every suggestion as it is, or pick one category to give them all.</p></div>")
+        out.append('<div class="card"><div style="overflow-x:auto"><table><thead><tr><th style="width:2em"></th><th>Merchant</th><th class="n">Lines</th><th class="n">Money</th>'
                    f'<th>Category</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></div>')
     return layout(conn, ctx, "/review", "Review", "".join(out))
 

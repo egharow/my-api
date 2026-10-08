@@ -232,6 +232,33 @@ class App:
         try:
             if path == "/who":
                 return self._redirect(back, cookies=[("Set-Cookie", f"who={quote(form.get('who', ''))}; Path=/; SameSite=Strict; Max-Age=31536000")])
+            if path == "/approve/bulk":
+                picks = []
+                for raw in multi.get("sel", []):
+                    try:
+                        key, cat = json.loads(raw)
+                        picks.append((str(key), str(cat)))
+                    except (ValueError, TypeError):
+                        continue
+                if not picks:
+                    return self._redirect("/review", "Tick at least one merchant first.", err=True)
+                chosen = form.get("category", "")
+                learn = form.get("learn") == "1"
+                done = skipped = 0
+                for key, cat in picks:
+                    target = chosen or cat
+                    if target == "Uncategorised":
+                        skipped += 1
+                        continue
+                    ids = [r[0] for r in conn.execute(
+                        """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id JOIN categories c ON c.id = t.category_id
+                           WHERE t.category_status = 'proposed' AND t.description_norm = ? AND c.name = ? AND b.status != 'committed'""", (key, cat))]
+                    if ids:
+                        done += categorize.approve(conn, ids, target, learn=learn, actor=who)
+                msg = f"{done} line(s) approved from {len(picks) - skipped} merchant(s)" + (" and remembered" if learn else "")
+                if skipped:
+                    msg += f". {skipped} had no suggestion: pick a category for them"
+                return self._redirect("/review", msg, err=bool(skipped and not done))
             if path == "/approve":
                 ids = [r[0] for r in conn.execute(
                     """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id

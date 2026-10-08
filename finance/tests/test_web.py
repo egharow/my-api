@@ -279,3 +279,32 @@ def test_review_groups_can_be_opened_to_show_their_lines(app):
     t = text(get(app, "/review"))
     assert "show the" in t and "line(s)" in t and "Amount ₪" in t
     assert "ONE OFF SERVICE" in t and "3,500.00" in t                  # the individual expense is visible inside its group
+
+
+def test_bulk_approve_takes_several_merchants_at_once(app, conn):
+    import json as _json
+    groups = [(r["description_norm"], r["cat"]) for r in conn.execute(
+        """SELECT t.description_norm, c.name AS cat FROM transactions t JOIN categories c ON c.id = t.category_id
+           WHERE t.category_status = 'proposed' GROUP BY t.description_norm, c.name""")]
+    assert len(groups) >= 2
+    page = text(get(app, "/review"))
+    assert "Approve several at once" in page and 'form="bulk"' in page and "Tick all shown" in page
+    sel = [_json.dumps(list(g), ensure_ascii=False) for g in groups[:2]]
+    res = post(app, "/approve/bulk", {"sel": sel, "category": "Fun", "learn": "1"})
+    assert res.status == 303
+    left = {(r["description_norm"], r["cat"]) for r in conn.execute(
+        """SELECT t.description_norm, c.name AS cat FROM transactions t JOIN categories c ON c.id = t.category_id
+           WHERE t.category_status = 'proposed' GROUP BY t.description_norm, c.name""")}
+    assert not (set(groups[:2]) & left)                                      # both merchants were approved in one go
+    none = post(app, "/approve/bulk", {"category": ""})
+    assert none.status == 303
+
+
+def test_review_can_be_filtered_to_merchants_with_or_without_a_suggestion(app):
+    both = text(get(app, "/review?show=all"))
+    match = text(get(app, "/review?show=match"))
+    none = text(get(app, "/review?show=none"))
+    assert "With a suggestion (" in both and "No suggestion yet (" in both
+    assert "no match: needs your review" not in match                      # only merchants that already have a suggestion
+    assert "choose…" not in match
+    assert "no match: needs your review" in none or "Nothing is waiting for approval in this view" in none
