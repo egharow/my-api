@@ -237,8 +237,8 @@ def test_saved_card_payer_rules_apply_without_overriding_a_choice(conn):
     for last4 in ("6045", "6201"):
         conn.execute("INSERT INTO accounts (kind, issuer, label, last4, currency, created_at) VALUES ('card','isracard',?,?,'ILS','x')",
                      (f"Isracard {last4}", last4))
-    conn.execute("INSERT INTO accounts (kind, issuer, label, currency, created_at) VALUES ('savings','onezero','One Zero','ILS','x')")
-    zero = conn.execute("SELECT id FROM accounts WHERE label = 'One Zero'").fetchone()[0]
+    conn.execute("INSERT INTO accounts (kind, issuer, label, currency, created_at) VALUES ('bank','manual','וואן זירו','ILS','x')")
+    zero = conn.execute("SELECT id FROM accounts WHERE label = 'וואן זירו'").fetchone()[0]
     conn.commit()
     reconcile.apply_card_payer_rules(conn); conn.commit()
     c45 = conn.execute("SELECT id, pays_from_account_id FROM accounts WHERE last4 = '6045'").fetchone()
@@ -273,3 +273,9 @@ def test_earlier_months_are_listed_with_gaps(app, conn):
     months = expected.history(conn, "2026-12-20")
     assert months and months[0]["key"] == "2026-10"                     # newest first, the last two months stay in the main list
     assert any(i["status"] == "todo" for m in months for i in m["items"])
+
+
+def test_review_groups_can_be_opened_to_show_their_lines(app):
+    t = text(get(app, "/review"))
+    assert "show the" in t and "line(s)" in t and "Amount ₪" in t
+    assert "ONE OFF SERVICE" in t and "3,500.00" in t                  # the individual expense is visible inside its group

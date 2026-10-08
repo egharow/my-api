@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, watchfolder, uploads, views, views_home, views_setup, views_trends
+from . import appmode, balances, categorize, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, watchfolder, uploads, views, views_home, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -357,6 +357,23 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path in ("/accounts/move", "/accounts/rename", "/accounts/close", "/accounts/delete"):
+                try:
+                    aid = int(form["id"])
+                    if path == "/accounts/move":
+                        accounts_mod.move_account(conn, aid, "up" if form.get("dir") == "up" else "down")
+                        return self._redirect("/balances", "")
+                    if path == "/accounts/rename":
+                        accounts_mod.rename_account(conn, aid, form.get("label", ""))
+                        return self._redirect("/balances", "Renamed")
+                    if path == "/accounts/close":
+                        date.fromisoformat(form.get("on", ""))
+                        accounts_mod.close_account(conn, aid, form["on"])
+                        return self._redirect("/balances", "Closed. It stays in your history before that date.")
+                    accounts_mod.delete_account(conn, aid)
+                    return self._redirect("/balances", "Deleted")
+                except (ValueError, KeyError) as exc:
+                    return self._redirect("/balances", str(exc), err=True)
             if path == "/setup/card-payer":
                 try:
                     accounts_mod.set_card_payer(conn, int(form["card"]), form.get("payer", ""))
@@ -435,7 +452,7 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
         print(moved)
     conn = connect(home.db_path)
     try:
-        need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn)
+        need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn) or bool(datafixes.pending(conn, appmode.app_dir()))
     finally:
         conn.close()
     if lan and not pin:
@@ -450,6 +467,7 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
             if firstrun.needed(c, appmode.app_dir()):
                 firstrun.run(c, home, appmode.app_dir())
             firstrun.repair(c, appmode.app_dir(), home)
+            datafixes.apply(c, home, appmode.app_dir())
         except Exception:
             import traceback
             print(traceback.format_exc())

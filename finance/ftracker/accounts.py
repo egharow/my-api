@@ -159,3 +159,67 @@ def set_card_payer(conn: sqlite3.Connection, card_id: int, choice: str) -> None:
         conn.execute("UPDATE accounts SET pays_from_account_id = NULL, pays_externally = 0 WHERE id = ?", (card_id,))
     audit(conn, "set_card_payer", "account", card_id, choice)
     conn.commit()
+
+
+def rename_account(conn: sqlite3.Connection, account_id: int, new_label: str) -> None:
+    new_label = new_label.strip()
+    if not new_label:
+        raise ValueError("type the new name")
+    old = conn.execute("SELECT label FROM accounts WHERE id = ?", (account_id,)).fetchone()
+    if not old:
+        raise ValueError("unknown account")
+    conn.execute("UPDATE accounts SET label = ? WHERE id = ?", (new_label, account_id))
+    audit(conn, "account_renamed", "account", account_id, f"{old[0]} -> {new_label}")
+    conn.commit()
+
+
+def close_account(conn: sqlite3.Connection, account_id: int, on: str) -> None:
+    """The account stays in net worth for dates before `on` and is left out from `on`."""
+    if not conn.execute("SELECT 1 FROM accounts WHERE id = ?", (account_id,)).fetchone():
+        raise ValueError("unknown account")
+    conn.execute("UPDATE accounts SET closed_on = ? WHERE id = ?", (on, account_id))
+    audit(conn, "account_closed", "account", account_id, on)
+    conn.commit()
+
+
+def delete_account(conn: sqlite3.Connection, account_id: int) -> None:
+    """Remove an account that should never have been there, with its balances. Refused if statements or lines use it."""
+    used = conn.execute("""SELECT (SELECT COUNT(*) FROM transactions WHERE account_id = ? OR counterparty_account_id = ?)
+                                + (SELECT COUNT(*) FROM statements WHERE account_id = ?)
+                                + (SELECT COUNT(*) FROM rules WHERE counterparty_account_id = ?)
+                                + (SELECT COUNT(*) FROM accounts WHERE pays_from_account_id = ?)""",
+                        (account_id,) * 5).fetchone()[0]
+    if used:
+        raise ValueError("this account has statements or payments attached, so it cannot be deleted. Close it instead, or merge it into another account")
+    conn.execute("DELETE FROM balances WHERE account_id = ?", (account_id,))
+    conn.execute("DELETE FROM goal_accounts WHERE account_id = ?", (account_id,))
+    conn.execute("DELETE FROM coverage WHERE account_id = ?", (account_id,))
+    conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+    audit(conn, "account_deleted", "account", account_id)
+    conn.commit()
+
+
+def move_account(conn: sqlite3.Connection, account_id: int, direction: str) -> None:
+    """Move an account one place up or down in the list. The order is saved and used everywhere accounts are listed."""
+    rows = conn.execute("""SELECT id FROM accounts WHERE active = 1 AND kind != 'card' AND issuer != 'sheet'
+                           AND (closed_on IS NULL OR closed_on > date('now')) ORDER BY sort_order, kind, label""").fetchall()
+    ids = [r[0] for r in rows]
+    if account_id not in ids:
+        raise ValueError("unknown account")
+    i = ids.index(account_id)
+    j = i - 1 if direction == "up" else i + 1
+    if 0 <= j < len(ids):
+        ids[i], ids[j] = ids[j], ids[i]
+    for n, aid in enumerate(ids, start=1):
+        conn.execute("UPDATE accounts SET sort_order = ? WHERE id = ?", (n, aid))
+    conn.commit()
+
+
+def set_all_balances(conn: sqlite3.Connection, account_id: int, amount: float, currency: str) -> int:
+    """Correct an account's whole history to one value in one currency (for example an investment held at its cost)."""
+    currency = currency.upper()
+    conn.execute("UPDATE accounts SET currency = ? WHERE id = ?", (currency, account_id))
+    n = conn.execute("UPDATE balances SET amount = ?, currency = ? WHERE account_id = ?", (amount, currency, account_id)).rowcount
+    audit(conn, "balances_corrected", "account", account_id, f"{amount} {currency} on {n} dates")
+    conn.commit()
+    return n

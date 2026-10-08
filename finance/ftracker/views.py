@@ -276,8 +276,15 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
                   ROUND(SUM(-t.amount), 2) AS total, c.name AS proposed, MIN(t.proposal_basis) AS basis
            FROM transactions t JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
            WHERE t.category_status = 'proposed' AND b.status != 'committed'
-           GROUP BY t.description_norm, c.name ORDER BY ABS(SUM(t.amount)) DESC LIMIT 60""").fetchall()
+           GROUP BY t.description_norm, c.name ORDER BY ABS(SUM(t.amount)) DESC LIMIT 300""").fetchall()
     cats = conn.execute("SELECT name FROM categories WHERE name != 'Uncategorised' ORDER BY kind, name").fetchall()
+    lines_by: dict[tuple, list] = {}
+    for r in conn.execute(
+            """SELECT t.description_norm AS key, c.name AS cat, t.txn_date, t.budget_month, t.description, -t.amount AS spent, a.label AS account
+               FROM transactions t JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
+               JOIN accounts a ON a.id = t.account_id
+               WHERE t.category_status = 'proposed' AND b.status != 'committed' ORDER BY t.txn_date DESC, t.id DESC"""):
+        lines_by.setdefault((r["key"], r["cat"]), []).append(r)
     out = ["<h1>Review categories</h1>",
            '<p class="muted">Each line is a merchant. The proposed category is a suggestion: approve it or pick another. '
            "Tick “remember” and the app will use your choice for this merchant from now on.</p>"]
@@ -292,7 +299,15 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
                      f'<input type="hidden" name="key" value="{esc(g["key"])}"><select name="category" required>{opts}</select> '
                      f'<label><input type="checkbox" name="learn" value="1" checked> remember</label> <button>Approve</button>', "row")
         flow = f'{money(abs(g["total"]), "ILS", 2)} in' if g["total"] < 0 else f'{money(g["total"], "ILS", 2)} out'
-        rows.append(f'<tr><td dir="auto">{esc(g["description"])}</td><td class="n">{g["n"]}</td><td class="n">{esc(flow)}</td>'
+        lines = lines_by.get((g["key"], g["proposed"]), [])
+        detail = ""
+        if lines:
+            body = "".join(f'<tr><td>{esc(l["txn_date"])}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
+                           f'<td class="n">{l["spent"]:,.2f}</td></tr>' for l in lines[:100])
+            more = f'<small>Showing the newest 100 of {len(lines)}.</small>' if len(lines) > 100 else ""
+            detail = (f'<details><summary class="muted">show the {len(lines)} line(s)</summary><table><thead><tr><th>Date</th><th>Description</th>'
+                      f'<th>Account</th><th class="n">Amount ₪</th></tr></thead><tbody>{body}</tbody></table>{more}</details>')
+        rows.append(f'<tr><td dir="auto">{esc(g["description"])}{detail}</td><td class="n">{g["n"]}</td><td class="n">{esc(flow)}</td>'
                     f'<td>{form}<small>{esc(g["basis"] or "")}</small></td></tr>')
     if rows:
         out.append('<div class="card"><div style="overflow-x:auto"><table><thead><tr><th>Merchant</th><th class="n">Lines</th><th class="n">Money</th>'
@@ -382,7 +397,8 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     rows = []
     accts = conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
                             LEFT JOIN owners o ON o.id = a.owner_id
-                            WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' ORDER BY a.kind, a.label""").fetchall()
+                            WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' AND (a.closed_on IS NULL OR a.closed_on > ?)
+                            ORDER BY a.sort_order, a.kind, a.label""", (ctx.today,)).fetchall()
     latest = {r["account_id"]: r for r in balances.latest(conn, ctx.today)}
     for a in accts:
         l = latest.get(a["id"])
@@ -408,8 +424,25 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                         '<button>Use this rate</button>' if cur_rate else
                         '<label>Today\'s rate (₪ per $) <input name="rate" inputmode="decimal" size="8" required></label> <button>Use this rate</button>', "row")
                 + _form(ctx, "/fx/refresh", '<button class="quiet">Fetch the current rate automatically</button>', "inline") + "</div>")
+    manage = []
+    for n, a in enumerate(accts):
+        arrows = (_form(ctx, "/accounts/move", f'<input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="dir" value="up">'
+                        f'<button class="quiet" title="Move up" {"disabled" if n == 0 else ""}>▲</button>', "inline") + " "
+                  + _form(ctx, "/accounts/move", f'<input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="dir" value="down">'
+                          f'<button class="quiet" title="Move down" {"disabled" if n == len(accts) - 1 else ""}>▼</button>', "inline"))
+        edit = ("<details><summary>Edit</summary>"
+                + _form(ctx, "/accounts/rename", f'<input type="hidden" name="id" value="{a["id"]}"><input name="label" value="{esc(a["label"])}" required> <button class="quiet">Rename</button>', "row")
+                + _form(ctx, "/accounts/close", f'<input type="hidden" name="id" value="{a["id"]}"><label>Closed on <input type="date" name="on" value="{esc(ctx.today)}"></label> '
+                        '<button class="quiet">Close it</button> <span class="muted">kept in the past, left out from that date</span>', "row")
+                + _form(ctx, "/accounts/delete", f'<input type="hidden" name="id" value="{a["id"]}"><button class="quiet">Delete it</button> '
+                        '<span class="muted">removes it and all its balances, as if it never existed</span>', "row")
+                + "</details>")
+        manage.append(f'<tr><td style="white-space:nowrap">{arrows}</td><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td><td>{edit}</td></tr>')
+    arrange = ('<div class="card" style="margin-top:12px"><h2>Arrange your accounts</h2><p class="muted">Use the arrows to put accounts in the order you want. '
+               'The order is saved and used on every page. Rename, close or delete an account under Edit.</p>'
+               f'<div style="overflow-x:auto"><table><tbody>{"".join(manage)}</tbody></table></div></div>')
     return layout(conn, ctx, "/balances", "Balances",
-                  f'<h1>Balances</h1>{banner}{rate_box}<div class="card">{form}</div><div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
+                  f'<h1>Balances</h1>{banner}{rate_box}<div class="card">{form}</div>{arrange}<div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
 
 
 def _days_ago(today: str, days: int) -> str:

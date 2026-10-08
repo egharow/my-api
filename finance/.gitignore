@@ -17,3 +17,4 @@ starter_rules.json
 seed/
 launcher-log.txt
 .setup.lock
+data_fixes.json

@@ -32,8 +32,11 @@ def build(out: Path, first_install: bool) -> Path:
                 z.writestr(f"FinanceApp/{f}", crlf(f, data))
             else:
                 z.writestr(f"FinanceApp/app/{f}", crlf(f, data))
+        for name in (["data_fixes.json"] if not first_install else []):          # your own corrections travel with every update
+            if (ROOT / name).is_file():
+                z.write(ROOT / name, f"FinanceApp/app/{name}")
         if first_install:
-            for name in PRIVATE:
+            for name in PRIVATE + ["data_fixes.json"]:
                 p = ROOT / name
                 for q in ([p] if p.is_file() else sorted(p.rglob("*")) if p.exists() else []):
                     if q.is_file():

@@ -34,12 +34,13 @@ def set_balance_for(conn: sqlite3.Connection, account_id: int, amount: float, as
 def latest(conn: sqlite3.Connection, as_of: str | None = None):
     as_of = as_of or date.today().isoformat()
     return conn.execute(
-        """SELECT a.id AS account_id, a.label, a.kind, a.currency AS account_currency, a.in_wealth, o.name AS owner,
+        """SELECT a.id AS account_id, a.label, a.kind, a.currency AS account_currency, a.in_wealth, a.sort_order, o.name AS owner,
                   b.as_of, b.amount, b.currency
            FROM accounts a LEFT JOIN owners o ON o.id = a.owner_id
            JOIN balances b ON b.id = (SELECT id FROM balances WHERE account_id = a.id AND as_of <= ?
                                       ORDER BY as_of DESC LIMIT 1)
-           WHERE a.active = 1 AND a.kind != 'card' ORDER BY a.kind, a.label""", (as_of,)).fetchall()
+           WHERE a.active = 1 AND a.kind != 'card' AND (a.closed_on IS NULL OR a.closed_on > ?)
+           ORDER BY a.sort_order, a.kind, a.label""", (as_of, as_of)).fetchall()
 
 
 def set_in_wealth(conn: sqlite3.Connection, shown_ids: list[int], included_ids: set[int]) -> None:
@@ -61,7 +62,7 @@ def net_worth(conn: sqlite3.Connection, as_of: str | None = None, in_currency: s
             continue
         value = fx.convert_asset(conn, r["amount"], r["currency"], in_currency, as_of)
         total += value
-        lines.append({"account": r["label"], "kind": r["kind"], "owner": r["owner"],
+        lines.append({"account": r["label"], "order": r["sort_order"], "kind": r["kind"], "owner": r["owner"],
                       "as_of": r["as_of"], "native": r["amount"], "currency": r["currency"], "value": value})
     return {"as_of": as_of, "currency": in_currency, "total": total, "lines": lines}
 
@@ -89,7 +90,8 @@ def pending(conn: sqlite3.Connection, today: str, days: int = STALE_DAYS):
     out = []
     for a in conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
                              LEFT JOIN owners o ON o.id = a.owner_id
-                             WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' ORDER BY o.name, a.kind, a.label"""):
+                             WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' AND (a.closed_on IS NULL OR a.closed_on > ?)
+                             ORDER BY a.sort_order, o.name, a.kind, a.label""", (today,)):
         l = latest_by.get(a["id"])
         out.append({"account": a, "latest": l, "current": bool(l and l["as_of"] >= cutoff)})
     return out

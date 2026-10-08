@@ -77,7 +77,7 @@ def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wea
         groups.setdefault(l["kind"], []).append(l)
     body = []
     for kind in sorted(groups, key=lambda k: KIND_ORDER.index(k) if k in KIND_ORDER else 99):
-        lines = sorted(groups[kind], key=lambda l: -abs(l["value"]))
+        lines = sorted(groups[kind], key=lambda l: (l["order"], -abs(l["value"])) if l["order"] else (0, -abs(l["value"])))
         sub = sum(l["value"] for l in lines)
         body.append(f'<tr class="grp"><td colspan="3"><b>{esc(KIND_LABEL.get(kind, kind))}</b></td><td class="n"></td>'
                     f'<td class="n"><b>{esc(money(sub, cur))}</b></td><td class="n">{abs(sub) / (abs(assets) + abs(debts) or 1) * 100:.0f}%</td><td></td></tr>')
