@@ -168,3 +168,66 @@ def category_lines(conn: sqlite3.Connection, category: str, months: list[str], o
                              "spent": e["actual"], "account": "Old budget sheet", "account_kind": "sheet", "subcategory": category, "category_status": "approved"})
         rows.sort(key=lambda r: r["txn_date"], reverse=True)
     return rows
+
+
+_SHEET_INCOME = {"ely": "Salary (Ely)", "shir": "Salary (Shir)", "army": "Reserve duty pay"}
+
+
+def income_source_name(label: str) -> str:
+    return _SHEET_INCOME.get(label.strip().lower(), label.strip())
+
+
+def income_owner(source: str) -> str | None:
+    """Whose income a source is, from its name. None means the household as a whole."""
+    n = source.lower()
+    if "shir" in n:
+        return "Shir"
+    if any(k in n for k in ("ely", "army", "reserve", "papaya", "matrix", "former employer")):
+        return "Ely"
+    return None
+
+
+def _bank_months(conn: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in conn.execute(
+        "SELECT DISTINCT t.budget_month FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.kind = 'bank'")}
+
+
+def income_by_source(conn: sqlite3.Connection, months: list[str], owner: str | None = None,
+                     committed_only: bool = False) -> dict[str, dict[str, float]]:
+    """Income per month and source. Months with a bank statement use the bank lines; older months use your old sheet."""
+    out: dict[str, dict[str, float]] = {}
+    if not months:
+        return out
+    bank = _bank_months(conn)
+    marks = ",".join("?" * len(months))
+    for r in conn.execute(
+            f"""SELECT t.budget_month AS m, c.name AS src, ROUND(SUM(t.amount), 2) AS amt FROM transactions t JOIN categories c ON c.id = t.category_id
+                WHERE c.kind = 'income' AND t.amount > 0 AND t.currency = 'ILS' AND t.budget_month IN ({marks}){_committed('t', committed_only)}
+                GROUP BY m, src""", months):
+        if r["m"] in bank:
+            out.setdefault(r["m"], {})[r["src"]] = r["amt"]
+    for r in conn.execute(
+            f"""SELECT month AS m, label, actual FROM monthly_entries WHERE section = 'income' AND actual > 0 AND month IN ({marks})"""
+            + _committed("monthly_entries", committed_only), months):
+        if r["m"] not in bank:
+            name = income_source_name(r["label"])
+            out.setdefault(r["m"], {})[name] = round(out.get(r["m"], {}).get(name, 0) + r["actual"], 2)
+    if owner:
+        out = {m: {k: v for k, v in d.items() if income_owner(k) == owner} for m, d in out.items()}
+    return {m: d for m, d in out.items() if d}
+
+
+def income_lines(conn: sqlite3.Connection, source: str, months: list[str]):
+    """Every payment behind one income source, newest first."""
+    bank = _bank_months(conn)
+    marks = ",".join("?" * len(months))
+    rows = [dict(r) for r in conn.execute(
+        f"""SELECT t.txn_date, t.budget_month, t.description, t.amount AS spent, a.label AS account, c.name AS subcategory, t.category_status
+            FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
+            WHERE c.kind = 'income' AND c.name = ? AND t.amount > 0 AND t.budget_month IN ({marks})""", [source, *months]) if r["budget_month"] in bank]
+    for e in conn.execute(f"SELECT month, label, actual FROM monthly_entries WHERE section = 'income' AND actual > 0 AND month IN ({marks})", months):
+        if e["month"] not in bank and income_source_name(e["label"]) == source:
+            rows.append({"txn_date": f"{e['month']}-01", "budget_month": e["month"], "description": f"{e['label']} (from your old budget sheet)",
+                         "spent": e["actual"], "account": "Old budget sheet", "subcategory": source, "category_status": "approved"})
+    rows.sort(key=lambda r: r["txn_date"], reverse=True)
+    return rows

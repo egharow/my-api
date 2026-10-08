@@ -48,3 +48,23 @@ def test_delete_refuses_accounts_with_statements_or_payments(conn):
     a = accounts.add_account(conn, "bank", "manual", "tmp")
     accounts.delete_account(conn, a)
     assert conn.execute("SELECT COUNT(*) FROM accounts WHERE id = ?", (a,)).fetchone()[0] == 0
+
+
+def test_salary_fixes_split_income_by_person_and_apply_to_waiting_lines(conn, home, tmp_path):
+    from ftracker import summary
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([
+        {"id": "r", "action": "rename_category", "category": "Salary", "to": "Salary (Ely)"},
+        {"id": "c", "action": "add_category", "name": "Salary (Shir)", "kind": "income"},
+        {"id": "u", "action": "add_rule", "pattern": "חינוך-משכו", "category": "Salary (Shir)", "mode": "income"},
+    ]), encoding="utf-8")
+    datafixes.apply(conn, home, app, date(2026, 10, 8))
+    names = {r[0] for r in conn.execute("SELECT name FROM categories WHERE kind = 'income'")}
+    assert {"Salary (Ely)", "Salary (Shir)"} <= names
+    assert summary.income_owner("Salary (Shir)") == "Shir" and summary.income_owner("Salary (Ely)") == "Ely" and summary.income_owner("Other income") is None
+    conn.execute("INSERT INTO monthly_entries (month, section, label, actual, source, created_at) VALUES ('2025-04','income','Shir',12000,'sheet','x')")
+    conn.execute("INSERT INTO monthly_entries (month, section, label, actual, source, created_at) VALUES ('2025-04','income','Ely',30000,'sheet','x')")
+    conn.commit()
+    both = summary.income_by_source(conn, ["2025-04"])
+    assert both["2025-04"] == {"Salary (Shir)": 12000.0, "Salary (Ely)": 30000.0}
+    assert summary.income_by_source(conn, ["2025-04"], "Shir")["2025-04"] == {"Salary (Shir)": 12000.0}

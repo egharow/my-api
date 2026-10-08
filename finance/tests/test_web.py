@@ -46,10 +46,14 @@ def test_every_page_renders(app, path):
 
 
 def test_spending_and_wealth_show_the_numbers(app):
-    t = text(get(app, "/spending"))
-    assert "Income and spending" in t and "Total spending by month" in t and "Every category, every month" in t
-    assert "28,000" in t                                          # March 2025 income from the old sheet
-    assert 'data-tip="' in t and "Table view" in t                # tooltips and the table alternative
+    t = text(get(app, "/spending?view=spending"))
+    assert "Total spending by month" in t and "Every category, every month" in t
+    both = text(get(app, "/spending"))
+    assert "Income and spending by month" in both and "Income by source, every month" in both and "Left over" in both
+    inc = text(get(app, "/spending?view=income"))
+    assert "Total income by month" in inc and "Every category, every month" not in inc
+    assert "28,000" in both                                       # March 2025 income from the old sheet
+    assert 'data-tip="' in both and "Table view" in both          # tooltips and the table alternative
     w = text(get(app, "/wealth"))
     assert "Net worth" in w and "Change between updates" in w and "What it is made of" in w
 

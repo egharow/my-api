@@ -124,16 +124,23 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
     rng = q.get("range") if q.get("range") in {r for r, _ in RANGES} else "all"
     owner = q.get("owner") or None
     cat = q.get("cat") or None
+    view = q.get("view") if q.get("view") in ("both", "spending", "income") else "both"
+    src_pick = q.get("src") or None
     with_spend = [m for m in summary.months_available(conn) if summary.spending_by_category(conn, m, owner)]
-    if not with_spend:
+    all_inc = summary.income_by_source(conn, summary.months_available(conn), owner)
+    if not with_spend and not all_inc:
         return '<div class="card"><p>No spending to show yet.</p></div>'
-    window = _month_window(with_spend, 240 if rng == "all" else int(rng))
+    window = _month_window(sorted(set(with_spend) | set(all_inc)) if view != "spending" else with_spend, 240 if rng == "all" else int(rng))
+    inc = {m: d for m, d in all_inc.items() if m in window}
+    inc_tot = {m: sum(d.values()) for m, d in inc.items()}
     data: dict[str, dict[str, float]] = {}
     for m in window:
         for r in summary.spending_by_category(conn, m, owner):
             data.setdefault(m, {})
             data[m][r["category"]] = data[m].get(r["category"], 0) + r["spent"]
     have = [m for m in window if m in data]
+    if not have and view == "spending":
+        return '<div class="card"><p>No spending to show yet.</p></div>'
     totals = {m: sum(data[m].values()) for m in have}
     grand = sum(totals.values())
     avg = grand / len(have) if have else 0
@@ -150,10 +157,21 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
         first, second = sum(totals[m] for m in have[:half]) / half, sum(totals[m] for m in have[half:]) / (len(have) - half)
         pct = (second - first) / first * 100 if first else 0
         trend_note = f"Monthly average {'up' if pct > 0 else 'down'} {abs(pct):.0f}% in the second half of this period ({money(first)} to {money(second)})."
-    tiles = ('<div class="tiles">' + _tile("Total spent", money(grand), esc(f"{len(have)} months"))
+    inc_all = sum(inc_tot.values())
+    both_months = [m for m in window if m in inc_tot and m in totals]
+    kept = sum(inc_tot[m] - totals[m] for m in both_months)
+    if view == "income":
+        tiles = ('<div class="tiles">' + _tile("Total income", money(inc_all), esc(f"{len(inc_tot)} months"))
+                 + _tile("Average a month", money(inc_all / len(inc_tot)) if inc_tot else "–", "")
+                 + _tile("Latest month", money(inc_tot[max(inc_tot)]) if inc_tot else "–", esc(max(inc_tot) if inc_tot else "")) + "</div>")
+    else:
+        tiles = ""
+    tiles += ('<div class="tiles">' + _tile("Total spent", money(grand), esc(f"{len(have)} months"))
              + _tile("Average a month", money(avg), "")
              + _tile("Highest month", money(totals[top_m]) if top_m else "–", esc(top_m or ""))
-             + _tile("Latest month", money(totals[have[-1]]) if have else "–", esc(have[-1] if have else "")) + "</div>")
+             + _tile("Latest month", money(totals[have[-1]]) if have else "–", esc(have[-1] if have else ""))
+             + (_tile("Income", money(inc_all), "") + _tile("Left over", money(kept), esc(f"over {len(both_months)} months with both")) if view == "both" else "")
+             + "</div>") if view != "income" else tiles
 
     def series(c):
         return [(m, data[m].get(c, 0.0) if c else totals[m]) for m in have]
@@ -171,11 +189,35 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
                   f'<button class="quiet">{"Leave out" if inc_r else "Include"}</button>', "row")
 
     owners = [r[0] for r in conn.execute("SELECT name FROM owners ORDER BY name")]
-    keep = {"owner": owner}
-    controls = (f'<p>{_switch(base, rng, RANGES, "range", keep)} &nbsp;·&nbsp; '
-                f'{_switch(base, owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"range": rng})}</p>')
+    keep = {"owner": owner, "view": view}
+    controls = (f'<p>{_switch(base, view, [("both", "Income and spending"), ("spending", "Spending only"), ("income", "Income only")], "view", {"range": rng, "owner": owner})}'
+                f' &nbsp;·&nbsp; {_switch(base, rng, RANGES, "range", keep)} &nbsp;·&nbsp; '
+                f'{_switch(base, owner or "", [("", "Household")] + [(o, o) for o in owners], "owner", {"range": rng, "view": view})}</p>')
+    inc_note = ('<p class="muted">Income by person follows the name of the source, for example “Salary (Shir)”. '
+                'Income only appears for people whose bank account has been imported.</p>')
 
-    if cat in cat_total:
+    inc_total_by_src: dict[str, float] = {}
+    for d in inc.values():
+        for k, v in d.items():
+            inc_total_by_src[k] = inc_total_by_src.get(k, 0) + v
+    inc_ranked = sorted(inc_total_by_src, key=lambda k: -inc_total_by_src[k])
+    owner_q = "&owner=" + esc(owner) if owner else ""
+    if src_pick and src_pick in inc_total_by_src and view != "spending":
+        ipick = q.get("month") if q.get("month") in inc else None
+        ilines = summary.income_lines(conn, src_pick, [ipick] if ipick else sorted(inc))
+        chips = " ".join(f'<a href="{base}?range={rng}&view={view}&src={esc(src_pick)}&month={m}{owner_q}"{" style=font-weight:700" if m == ipick else ""}>{esc(m[2:])}</a>'
+                         for m in sorted(inc) if src_pick in inc[m])
+        irows = "".join(f'<tr><td>{esc(l["txn_date"])}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
+                        f'<td class="n">{l["spent"]:,.2f}</td></tr>' for l in ilines[:400])
+        series_i = [(m, inc[m].get(src_pick, 0.0)) for m in sorted(inc)]
+        main = (f'<section class="card"><h2>{esc(src_pick)} by month <small><a href="{base}?range={rng}&view={view}{owner_q}">back to all</a></small></h2>'
+                f'{charts.bar_chart(series_i, "ILS", src_pick + " by month")}'
+                f'<p class="muted">Total {esc(money(inc_total_by_src[src_pick]))}.</p><p>Look at one month: {chips} · '
+                f'<a href="{base}?range={rng}&view={view}&src={esc(src_pick)}{owner_q}">all months</a></p></section>'
+                f'<section class="card" style="margin-top:16px"><h2>Every payment ({len(ilines)})</h2><div style="overflow-x:auto"><table><thead><tr><th>Date</th>'
+                f'<th>Description</th><th>Account</th><th class="n">Amount ₪</th></tr></thead><tbody>{irows}</tbody></table></div></section>')
+        small = ""
+    elif cat in cat_total and view != "income":
         pick = q.get("month") if q.get("month") in have else None
         lines = summary.category_lines(conn, cat, [pick] if pick else have, owner)
         owner_q = "&owner=" + esc(owner) if owner else ""
@@ -212,11 +254,19 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
                 f'<p class="muted">A “?” means the category is only proposed so far. Refunds show as negative amounts.</p></section>')
         small = ""
     else:
-        main = (f'<section class="card"><h2>Total spending by month</h2>{charts.bar_chart(series(None), "ILS", "Spending by month")}</section>')
+        months_all = [m for m in window if m in totals or m in inc_tot]
+        if view == "both":
+            main = (f'<section class="card"><h2>Income and spending by month</h2>'
+                    f'{charts.grouped_bars(months_all, [inc_tot.get(m) for m in months_all], [totals.get(m) for m in months_all])}'
+                    f'{charts.data_table(["Month", "Income", "Spending", "Left over"], [[m, f"{inc_tot.get(m, 0):,.0f}", f"{totals.get(m, 0):,.0f}", f"{inc_tot.get(m, 0) - totals.get(m, 0):,.0f}"] for m in months_all], "Income and spending by month")}</section>')
+        elif view == "income":
+            main = (f'<section class="card"><h2>Total income by month</h2>{charts.bar_chart([(m, inc_tot[m]) for m in months_all if m in inc_tot], "ILS", "Income by month")}</section>')
+        else:
+            main = (f'<section class="card"><h2>Total spending by month</h2>{charts.bar_chart(series(None), "ILS", "Spending by month")}</section>')
         cards = "".join(f'<section class="card"><h2><a href="{base}?range={rng}&cat={esc(c)}{"&owner=" + esc(owner) if owner else ""}">{esc(c)}</a>'
                         f' <small>{esc(money(cat_total[c]))}</small></h2>{charts.bar_chart(series(c), "ILS", c + " by month", average=False)}</section>'
                         for c in ranked[:6])
-        small = f'<h2 style="margin-top:16px">Biggest categories over time</h2><div class="grid">{cards}</div>'
+        small = f'<h2 style="margin-top:16px">Biggest categories over time</h2><div class="grid">{cards}</div>' if view != "income" else ""
 
     head = "".join(f"<th class='n'>{esc(m[2:])}</th>" for m in have)
     rows = []
@@ -229,5 +279,18 @@ def trends_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/spend
               f'<thead><tr><th>Category</th>{head}<th class="n">Total</th><th class="n">Avg / month</th></tr></thead><tbody>{"".join(rows)}</tbody>'
               f'<tfoot><tr><td><b>Total</b></td>{foot}<td class="n"><b>{grand:,.0f}</b></td><td class="n"><b>{avg:,.0f}</b></td></tr></tfoot></table></div>'
               f'<p class="muted">Amounts in ₪, by billing month. Card payments and transfers between your own accounts are not counted.</p></section>')
-    html = f'{controls}{tiles}<p>{esc(trend_note)}</p>{source_note}{reimb}{main}{small}{matrix}'
+    inc_matrix = ""
+    if view != "spending" and inc_ranked and not (src_pick and src_pick in inc_total_by_src):
+        ihead = "".join(f"<th class='n'>{esc(m[2:])}</th>" for m in sorted(inc))
+        irows = "".join(
+            f'<tr><td dir="auto"><a href="{base}?range={rng}&view={view}&src={esc(k)}{owner_q}">{esc(k)}</a></td>'
+            + "".join(f'<td class="n"><a href="{base}?range={rng}&view={view}&src={esc(k)}&month={m}{owner_q}">{inc[m].get(k, 0):,.0f}</a></td>' for m in sorted(inc))
+            + f'<td class="n"><b>{inc_total_by_src[k]:,.0f}</b></td></tr>' for k in inc_ranked)
+        ifoot = "".join(f'<td class="n"><b>{inc_tot[m]:,.0f}</b></td>' for m in sorted(inc))
+        inc_matrix = (f'<section class="card" style="margin-top:16px"><h2>Income by source, every month</h2><div style="overflow-x:auto"><table>'
+                      f'<thead><tr><th>Source</th>{ihead}<th class="n">Total</th></tr></thead><tbody>{irows}</tbody>'
+                      f'<tfoot><tr><td><b>Total</b></td>{ifoot}<td class="n"><b>{inc_all:,.0f}</b></td></tr></tfoot></table></div></section>')
+    if view == "income":
+        matrix = ""
+    html = f'{controls}{tiles}<p>{esc(trend_note) if view != "income" else ""}</p>{source_note if view != "income" else inc_note}{reimb if view != "income" else ""}{main}{small}{inc_matrix}{matrix if not (src_pick and view != "spending") else ""}'
     return html

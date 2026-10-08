@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: rename_account, close_account, delete_account, merge_accounts, set_balances.
+Actions: rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule.
 """
 import json
 import sqlite3
@@ -9,7 +9,7 @@ import traceback
 from datetime import date
 from pathlib import Path
 
-from . import accounts
+from . import accounts, categorize
 from .backup import make_backup
 from .config import Home
 from .db import audit
@@ -42,6 +42,20 @@ def _account(conn, label: str):
 
 def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
     action = e["action"]
+    if action == "rename_category":
+        if not conn.execute("SELECT 1 FROM categories WHERE name = ?", (e["category"],)).fetchone():
+            return f"skipped: no category called {e['category']}"
+        categorize.rename_category(conn, e["category"], e["to"])
+        return f"category {e['category']} renamed to {e['to']}"
+    if action == "add_category":
+        if conn.execute("SELECT 1 FROM categories WHERE name = ?", (e["name"],)).fetchone():
+            return f"category {e['name']} already exists"
+        conn.execute("INSERT INTO categories (name, parent_id, kind, neutral) VALUES (?, NULL, ?, 0)", (e["name"], e.get("kind", "expense")))
+        conn.commit()
+        return f"category {e['name']} added"
+    if action == "add_rule":
+        categorize.add_rule_from_form(conn, e["pattern"], e["category"], e.get("mode", "expense"))
+        return f"rule added: {e['pattern']} -> {e['category']}"
     acct = _account(conn, e.get("label") or e.get("from") or "")
     if action == "merge_accounts":
         dst = _account(conn, e["into"])

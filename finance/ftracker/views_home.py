@@ -132,17 +132,7 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
 
 def spending_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     body = trends_body(conn, ctx, q, "/spending")
-    months = summary.months_available(conn)[-18:]
-    ov = [summary.month_overview(conn, m) for m in months]
-    ov = [o for o in ov if o["spending"] or o["income"]]
-    window = _month_window([o["month"] for o in ov], 120)
-    by = {o["month"]: o for o in ov}
-    inc = [by[m]["income"] if m in by else None for m in window]
-    spent = [by[m]["spending"] if m in by else None for m in window]
-    extra = (f'<section class="card" style="margin-top:16px"><h2>Income and spending</h2>{charts.grouped_bars(window, inc, spent)}'
-             f'{charts.data_table(["Month", "Income", "Spending"], [[m, f"{i or 0:,.0f}", f"{s or 0:,.0f}"] for m, i, s in zip(window, inc, spent)], "Income and spending by month")}</section>'
-             ) if window else ""
-    return layout(conn, ctx, "/spending", "Spending", f"<h1>Spending</h1>{body}{extra}")
+    return layout(conn, ctx, "/spending", "Spending", f"<h1>Spending and income</h1>{body}")
 
 
 def wealth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
