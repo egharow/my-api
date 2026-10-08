@@ -308,3 +308,16 @@ def test_review_can_be_filtered_to_merchants_with_or_without_a_suggestion(app):
     assert "no match: needs your review" not in match                      # only merchants that already have a suggestion
     assert "choose…" not in match
     assert "no match: needs your review" in none or "Nothing is waiting for approval in this view" in none
+
+
+def test_sheet_mortgage_shows_in_categories_once_and_not_twice_in_totals(app, conn):
+    from ftracker import summary
+    conn.execute("INSERT INTO monthly_entries (month, section, label, actual, source, created_at) VALUES ('2025-04','debt','Mortgage',6269,'sheet','x')")
+    conn.execute("INSERT INTO monthly_entries (month, section, label, actual, source, created_at) VALUES ('2025-04','debt','Loan 1',867,'sheet','x')")
+    conn.commit()
+    cats = {r["category"]: r["spent"] for r in summary.spending_by_category(conn, "2025-04")}
+    assert cats["Mortgage"] == 6269.0 and cats["Loans"] == 867.0
+    assert summary.month_overview(conn, "2025-04")["spending"] == round(sum(cats.values()), 2)      # the debt is counted once
+    lines = summary.category_lines(conn, "Mortgage", ["2025-04"])
+    assert lines and lines[0]["spent"] == 6269.0 and "old budget sheet" in lines[0]["description"]
+    assert "Mortgage" in text(get(app, "/spending?cat=Mortgage&month=2025-04"))

@@ -7,6 +7,22 @@ def _committed(alias: str, committed_only: bool) -> str:
     return (f" AND {alias}.batch_id IN (SELECT id FROM batches WHERE status = 'committed')" if committed_only else "")
 
 
+def _debt_label(label: str) -> str:
+    return "Mortgage" if label.strip().lower() == "mortgage" else "Loans"
+
+
+def debt_entries(conn: sqlite3.Connection, months: list[str] | None = None, committed_only: bool = False):
+    """Mortgage and loan payments recorded in your old budget sheet, for months with no bank statement of their own.
+
+    From the months where a bank statement exists, the payments come from its lines instead, so nothing counts twice.
+    """
+    has_bank = {r[0] for r in conn.execute(
+        """SELECT DISTINCT t.budget_month FROM transactions t JOIN accounts a ON a.id = t.account_id WHERE a.kind = 'bank'""")}
+    where = "section = 'debt' AND actual IS NOT NULL AND actual > 0" + _committed("monthly_entries", committed_only)
+    return [r for r in conn.execute(f"SELECT month, label, actual FROM monthly_entries WHERE {where} ORDER BY month, label")
+            if r["month"] not in has_bank and (months is None or r["month"] in months)]
+
+
 def include_reimbursed(conn: sqlite3.Connection) -> bool:
     row = conn.execute("SELECT value FROM settings WHERE key = 'include_reimbursed'").fetchone()
     return bool(row) and row[0] == "1"
@@ -48,14 +64,27 @@ def spending_by_category(conn: sqlite3.Connection, month: str | None = None, own
     if owner:
         where.append("o.name = ?")
         args.append(owner)
-    return conn.execute(
+    rows = [dict(r) for r in conn.execute(
         f"""SELECT COALESCE(p.name, c.name) AS category, c.name AS subcategory,
                    ROUND(SUM(-t.amount), 2) AS spent, COUNT(*) AS n
             FROM transactions t JOIN categories c ON c.id = t.category_id
             LEFT JOIN categories p ON p.id = c.parent_id
             JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
             WHERE {' AND '.join(where)} AND t.currency = 'ILS'{_committed('t', committed_only)}
-            GROUP BY category, subcategory ORDER BY spent DESC""", args).fetchall()
+            GROUP BY category, subcategory""", args)]
+    if not owner:                                   # sheet debts belong to the household, not to one person
+        for e in debt_entries(conn, None, committed_only):
+            m = e["month"]
+            if (month and m != month) or (start and m < start) or (end and m > end):
+                continue
+            name = _debt_label(e["label"])
+            row = next((r for r in rows if r["category"] == name and r["subcategory"] == name), None)
+            if row:
+                row["spent"] = round(row["spent"] + e["actual"], 2)
+                row["n"] += 1
+            else:
+                rows.append({"category": name, "subcategory": name, "spent": round(e["actual"], 2), "n": 1})
+    return sorted(rows, key=lambda r: -r["spent"])
 
 
 def spending_by_source(conn: sqlite3.Connection, months: list[str], owner: str | None = None) -> dict[str, float]:
@@ -71,6 +100,8 @@ def spending_by_source(conn: sqlite3.Connection, months: list[str], owner: str |
         where.append("o.name = ?")
         args.append(owner)
     out = {"card": 0.0, "bank": 0.0, "sheet": 0.0}
+    if not owner:
+        out["sheet"] += round(sum(e["actual"] for e in debt_entries(conn, set(months))), 2)
     for r in conn.execute(
             f"""SELECT CASE WHEN a.issuer = 'sheet' THEN 'sheet' ELSE a.kind END AS src, ROUND(SUM(-t.amount), 2) AS spent
                 FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
@@ -99,8 +130,7 @@ def month_overview(conn: sqlite3.Connection, month: str, committed_only: bool = 
     else:
         inc = conn.execute("SELECT ROUND(COALESCE(SUM(actual),0),2) FROM monthly_entries WHERE month = ? AND section = 'income'"
                            + _committed("monthly_entries", committed_only), (month,)).fetchone()[0]
-        spent += conn.execute("SELECT COALESCE(SUM(actual),0) FROM monthly_entries WHERE month = ? AND section = 'debt'"
-                              + _committed("monthly_entries", committed_only), (month,)).fetchone()[0]
+        # the sheet's mortgage and loan payments are already inside spending_by_category for these months
         source = "sheet" if inc else "none"
     saved_to = conn.execute("SELECT ROUND(COALESCE(SUM(actual),0),2) FROM monthly_entries WHERE month = ? AND section = 'saving'"
                             + _committed("monthly_entries", committed_only), (month,)).fetchone()[0]
@@ -124,9 +154,17 @@ def category_lines(conn: sqlite3.Connection, category: str, months: list[str], o
     if owner:
         where.append("o.name = ?")
         args.append(owner)
-    return conn.execute(
+    rows = conn.execute(
         f"""SELECT t.id, t.txn_date, t.budget_month, t.description, -t.amount AS spent, a.label AS account, a.kind AS account_kind,
                    c.name AS subcategory, t.category_status
             FROM transactions t JOIN categories c ON c.id = t.category_id LEFT JOIN categories p ON p.id = c.parent_id
             JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
             WHERE {' AND '.join(where)} ORDER BY t.txn_date DESC, t.id DESC""", args).fetchall()
+    rows = [dict(r) for r in rows]
+    if not owner and category in ("Mortgage", "Loans"):
+        for e in debt_entries(conn, set(months)):
+            if _debt_label(e["label"]) == category:
+                rows.append({"id": None, "txn_date": f"{e['month']}-01", "budget_month": e["month"], "description": f"{e['label']} (from your old budget sheet)",
+                             "spent": e["actual"], "account": "Old budget sheet", "account_kind": "sheet", "subcategory": category, "category_status": "approved"})
+        rows.sort(key=lambda r: r["txn_date"], reverse=True)
+    return rows
