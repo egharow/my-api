@@ -63,6 +63,31 @@ button{cursor:pointer;background:var(--accent);color:#fff;border-color:var(--acc
 .item{padding:10px 0;border-bottom:1px solid var(--grid)}.sev{font-weight:600}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .comment{border-left:3px solid var(--axis);padding:2px 10px;margin:8px 0}.comment b{font-size:13px}
 #tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--surface);padding:5px 9px;border-radius:6px;font-size:13px;display:none;z-index:9;max-width:320px}
+
+.modes{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.seg{display:inline-flex;border:1px solid var(--axis);border-radius:8px;overflow:hidden}.seg a{padding:5px 11px;font-size:14px;color:var(--ink2);text-decoration:none;white-space:nowrap}
+.seg a.on{background:var(--ink);color:var(--surface)}
+.monthnav{display:inline-flex;align-items:center;gap:8px}.monthnav .mt{font-size:18px}
+.nb{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border:1px solid var(--axis);border-radius:8px;color:var(--ink);text-decoration:none;font-size:18px}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 0 6px}
+.trio>div{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 14px}
+.trio small{color:var(--ink2);display:block;font-size:13px}.trio b{font-size:24px}.trio small.k{color:var(--muted);font-size:12px;margin-top:2px}
+.cats{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:4px 14px}
+.cat{border-bottom:1px solid var(--grid)}
+.cat>summary,.cat.head,.cat.foot{display:grid;grid-template-columns:22px minmax(110px,1fr) minmax(90px,170px) 100px 120px;gap:10px;align-items:center;padding:9px 0;font-size:14px}
+.cat>summary{cursor:pointer;list-style:none}.cat>summary::-webkit-details-marker{display:none}
+.cat.head{font-size:12px;color:var(--muted)}.cat.foot{font-weight:600;border-bottom:0}
+.cat .tw{color:var(--muted);transition:transform .15s}.cat[open]>summary .tw{transform:rotate(90deg)}
+.cat .lines{margin:0 0 10px 32px;font-size:13px}
+.cat .lines>div{display:grid;grid-template-columns:44px minmax(0,1fr) 80px minmax(110px,170px);gap:10px;padding:5px 0;border-top:1px dashed var(--grid);align-items:start}
+.share{display:flex;align-items:center;gap:8px}.share .t{flex:1;height:8px;background:var(--grid);border-radius:4px;min-width:50px}.share .t span{display:block;height:8px;background:var(--s2);border-radius:4px}
+.share em{font-style:normal;color:var(--muted);font-size:12px;width:34px;text-align:right}
+.n{text-align:right;font-variant-numeric:tabular-nums}.cap{font-size:13px;color:var(--muted)}
+.up{color:#b5461c;font-weight:600}.down{color:var(--goodtext);font-weight:600}
+.srcrow{display:flex;justify-content:space-between;padding:6px 0;border-top:1px dashed var(--grid)}
+.todo{display:flex;gap:8px;flex-wrap:wrap}.todo .chip{background:var(--surface);text-decoration:none;color:var(--ink);padding:5px 12px}
+details.chg summary{cursor:pointer;color:var(--accent);font-size:13px}details.chg form{margin-top:4px}
+@media (max-width:640px){.hidem{display:none}.trio{grid-template-columns:1fr}.cat>summary,.cat.head,.cat.foot{grid-template-columns:20px minmax(80px,1fr) 90px 100px}.cat .lines>div{grid-template-columns:40px minmax(0,1fr) 70px}.cat .lines>div>span:last-child{grid-column:2/4}}
 @media (max-width:600px){.hrow{grid-template-columns:90px 1fr 88px}.tile .v{font-size:22px}}
 """
 
@@ -78,7 +103,7 @@ document.addEventListener('mousemove',function(e){t.style.left=Math.min(e.client
 document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))t.style.display='none'});})();
 """
 
-NAV = [("/", "Home"), ("/upload", "Upload"), ("/review", "Review"), ("/spending", "Spending"), ("/wealth", "Wealth"), ("/setup", "Settings")]
+NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/wealth", "Wealth"), ("/setup", "Settings")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:

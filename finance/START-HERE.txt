@@ -10,14 +10,14 @@ Everything stays on your computer. Nothing is sent anywhere except the Google Sh
    - The first time, a small window shows it setting itself up (about 2 to 5 minutes). Leave it open.
    - Then the app opens in its own window. Your people, income rules, old budget history and the
      three statements you already sent are already loaded. Nothing to import or set up.
-4. In the app, "Home" lists the steps of each round and ticks them off:
-   1. Upload: drop the statements; the checklist ticks each one as it arrives.
-   2. Review: confirm the proposed categories (it learns from your choices).
-   3. Check anything flagged as a problem.
-   4. Balances: type your numbers every month.
-   5. Submit, so the numbers are recorded with the date.
-   Spending and Wealth show the trends (bars by month, net worth over time, goals).
-   Settings has "Put an icon on my desktop", so you never need this folder again.
+4. In the app:
+   - Overview opens on a month: income, expenses and what you kept, then where the money went.
+     Click a category to see its payments and fix any category. Switch to 6 or 12 months for averages.
+     The "To do" box at the bottom lists what is left this month.
+   - Upload: drop the statements; the checklist ticks each one as it arrives.
+   - Review: confirm the proposed categories (it learns from your choices).
+   - Wealth: net worth over time and your goals.
+   - Settings has "Put an icon on my desktop", so you never need this folder again.
 
 NEW STATEMENTS (every month)
 Open the app, go to Upload and DRAG the files onto the box. That is all.

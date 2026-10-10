@@ -110,7 +110,7 @@ def grouped_bars(months: list[str], income: list[float | None], spending: list[f
     def sy(v):
         return T + (H - T - B) * (1 - v / top)
 
-    out = [_legend([("Income", "--s1"), ("Spending", "--s2")]),
+    out = [_legend([("Income", "--s1"), ("Expenses", "--s2")]),
            f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Income and spending by month" class="chart">']
     for t in ticks:
         y = sy(t)

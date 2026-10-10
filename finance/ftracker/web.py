@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, watchfolder, uploads, views, views_home, views_setup, views_trends
+from . import appmode, balances, categorize, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, watchfolder, uploads, views, views_home, views_overview, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -136,13 +136,13 @@ class App:
 
     def _get(self, conn, ctx, path, q) -> Response:
         if path == "/":
-            return _html(200, views_home.home(conn, ctx))
+            return _html(200, views_overview.overview_page(conn, ctx, q))
         if path == "/dashboard":
             return _html(200, views.dashboard(conn, ctx, q))
         if path == "/upload":
             return _html(200, views_home.upload_page(conn, ctx))
         if path in ("/spending", "/trends"):
-            return _html(200, views_home.spending_page(conn, ctx, q))
+            return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
         if path == "/review":
@@ -424,6 +424,15 @@ class App:
                 shown = [int(x) for x in multi.get("shown", []) if x.isdigit()]
                 balances.set_in_wealth(conn, shown, {a for a in shown if form.get(f"inc_{a}") == "1"})
                 return self._redirect("/wealth", "Saved. Net worth now counts only the accounts you ticked.")
+            if path == "/line/category":
+                back = form.get("back", "/")
+                if not back.startswith("/") or back.startswith("//") or "\n" in back or "://" in back:
+                    back = "/"
+                try:
+                    categorize.approve(conn, [int(form["id"])], form["category"], learn=form.get("learn") == "1", actor=who)
+                except (ValueError, KeyError, PermissionError) as exc:
+                    return self._redirect(back, str(exc), err=True)
+                return self._redirect(back, f"Moved to {form['category']}")
             if path == "/setting/reimbursed":
                 summary.set_include_reimbursed(conn, form.get("on") == "1")
                 return self._redirect(form.get("next") if form.get("next") in ("/", "/spending") else "/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")

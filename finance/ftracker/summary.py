@@ -231,3 +231,35 @@ def income_lines(conn: sqlite3.Connection, source: str, months: list[str]):
                          "spent": e["actual"], "account": "Old budget sheet", "subcategory": source, "category_status": "approved"})
     rows.sort(key=lambda r: r["txn_date"], reverse=True)
     return rows
+
+
+def invested(conn: sqlite3.Connection, month: str, owner: str | None = None) -> float:
+    """Money put into savings or investments in a month. It is not spent: it counts as kept.
+
+    Months with a bank statement use transfers whose destination is an investment, pension or savings account;
+    older months use the savings lines of your old sheet. A transfer to an account of an unknown kind counts as nothing.
+    """
+    if month in _bank_months(conn):
+        where, args = "", [month]
+        if owner:
+            where, args = " AND o.name = ?", [month, owner]
+        return conn.execute(
+            f"""SELECT ROUND(COALESCE(SUM(-t.amount), 0), 2) FROM transactions t JOIN accounts cp ON cp.id = t.counterparty_account_id
+                JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
+                WHERE t.budget_month = ? AND t.kind = 'transfer' AND t.amount < 0 AND cp.kind IN ('investment','pension','savings'){where}""",
+            args).fetchone()[0]
+    where, args = "", [month]
+    if owner:
+        where, args = " AND o.name = ?", [month, owner]
+    return conn.execute(
+        f"""SELECT ROUND(COALESCE(SUM(e.actual), 0), 2) FROM monthly_entries e LEFT JOIN owners o ON o.id = e.owner_id
+            WHERE e.month = ? AND e.section = 'saving'{where}""", args).fetchone()[0]
+
+
+def find_lines(conn: sqlite3.Connection, text: str, limit: int = 300):
+    """Payments whose description contains the text, newest first, whatever their category or state."""
+    like = f"%{text.strip()}%"
+    return conn.execute(
+        """SELECT t.id, t.txn_date, t.budget_month, t.description, -t.amount AS spent, a.label AS account, c.name AS category, t.category_status
+           FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
+           WHERE t.description LIKE ? OR t.detail LIKE ? ORDER BY t.txn_date DESC, t.id DESC LIMIT ?""", (like, like, limit)).fetchall()

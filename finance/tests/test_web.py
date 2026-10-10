@@ -45,23 +45,37 @@ def test_every_page_renders(app, path):
     assert res.status == 200 and "<title>" in text(res)
 
 
-def test_spending_and_wealth_show_the_numbers(app):
-    t = text(get(app, "/spending?view=spending"))
-    assert "Total spending by month" in t and "Every category, every month" in t
-    both = text(get(app, "/spending"))
-    assert "Income and spending by month" in both and "Income by source, every month" in both and "Left over" in both
-    inc = text(get(app, "/spending?view=income"))
-    assert "Total income by month" in inc and "Every category, every month" not in inc
-    assert "28,000" in both                                       # March 2025 income from the old sheet
-    assert 'data-tip="' in both and "Table view" in both          # tooltips and the table alternative
+def test_overview_shows_income_expenses_kept_by_month_and_by_period(app):
+    month = text(get(app, "/?p=month&m=2025-03"))
+    assert "March 2025" in month and "Income" in month and "Expenses" in month and "Kept" in month
+    assert "28,000" in month or "Where it went" in month                              # March 2025 comes from the old sheet
+    assert "Where it went" in month
+    period = text(get(app, "/?p=6&end=2025-03"))
+    assert "Average income / month" in period and "Average expenses / month" in period and "Average kept / month" in period
+    assert "Average per category" in period and "Table view" in period
+    custom = text(get(app, "/?p=custom&from=2025-01&to=2025-03"))
+    assert "Average per category" in custom
     w = text(get(app, "/wealth"))
     assert "Net worth" in w and "Change between updates" in w and "What it is made of" in w
 
 
-def test_home_walks_through_the_steps_and_upload_ticks_boxes(app):
+def test_overview_opens_a_category_and_lets_you_move_a_payment(app, conn):
+    page = text(get(app, "/?p=month&m=2025-03"))
+    assert 'class="cat"' in page and "change category" in page
+    line = conn.execute("""SELECT t.id FROM transactions t JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
+                           WHERE t.budget_month = '2025-03' AND c.kind = 'expense' AND b.status != 'committed' LIMIT 1""").fetchone()[0]
+    res = post(app, "/line/category", {"id": str(line), "category": "Fun", "back": "/?p=month&m=2025-03"})
+    assert res.status == 303 and dict(res.headers)["Location"].startswith("/?p=month")
+    assert conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.id = ?", (line,)).fetchone()[0] == "Fun"
+    evil = post(app, "/line/category", {"id": str(line), "category": "Fun", "back": "//evil.example"})
+    assert dict(evil.headers)["Location"] == "/"                                       # only addresses inside the app are allowed
+    found = text(get(app, "/?find=SUPER"))
+    assert "Payments matching" in found and "SUPER" in found
+
+
+def test_home_shows_what_is_left_to_do_and_upload_ticks_boxes(app):
     h = text(get(app, "/"))
-    for step in ("Upload your statements", "Confirm categories", "Check for problems", "Update balances", "Submit"):
-        assert step in h
+    assert "To do" in h
     u = text(get(app, "/upload"))
     assert "Card statements" in u and "Bank statements" in u and "Numbers you type" in u
     assert "Isracard" in u and "Received" in u                    # the statement imported in the fixture is ticked
@@ -195,18 +209,6 @@ def test_wealth_filter_leaves_chosen_accounts_out_everywhere(app, conn):
     assert after < before or before == 0
     assert "Not counting 1 account(s)" in text(get(app, "/wealth"))
     assert balances.net_worth(conn, "2026-10-05", everything=True)["total"] == before
-
-
-def test_spending_includes_bank_statement_lines(app):
-    t = text(get(app, "/spending"))
-    assert "Where it was recorded" in t and "bank statements" in t
-
-
-def test_category_drill_down_shows_merchants_and_every_payment(app):
-    t = text(get(app, "/spending?cat=Food"))
-    assert "What makes up Food" in t and "Every payment" in t and "Biggest merchants" in t
-    month = text(get(app, "/spending?cat=Food&month=2025-03"))
-    assert "2025-03 only" in month
 
 
 def test_settings_and_upload_pages_offer_the_watched_folder(app, tmp_path):
