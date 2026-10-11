@@ -7,8 +7,9 @@ import sqlite3
 from datetime import date
 from html import escape as esc
 
-from . import balances, charts, closing, expected, insights, summary
+from . import balances, budgets, charts, closing, expected, insights, summary
 from .charts import money
+from .views_budget import budget_card
 from .views import Ctx, _form, counts, dmy, layout
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -72,17 +73,19 @@ def _cat_options(conn) -> str:
         "SELECT name FROM categories WHERE name != 'Uncategorised' AND kind IN ('expense','fee','debt','income') ORDER BY kind, name"))
 
 
-def _change_form(ctx: Ctx, line_id, cats: str, back: str) -> str:
+def _change_form(ctx: Ctx, line_id, cats: str, back: str, month: str | None = None) -> str:
     if ctx.readonly:
         return ""
     if not line_id:
         return '<span class="cap">from your old sheet</span>'
+    ok = ('<label class="cap"><input type="checkbox" name="ok_closed" value="1" required> this month is closed, change it anyway</label> '
+          if month and month in ctx.closed else "")
     return ('<details class="chg"><summary>change category / leave out</summary>'
-            + _form(ctx, "/line/category", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="back" value="{esc(back)}">'
+            + _form(ctx, "/line/category", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="back" value="{esc(back)}">{ok}'
                     f'<select name="category" required><option value="" selected disabled>choose…</option>{cats}</select> '
                     '<label class="cap"><input type="checkbox" name="learn" value="1"> remember</label> <button class="quiet">Move</button>', "row")
             + _form(ctx, "/line/leaveout", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="on" value="1">'
-                    f'<input type="hidden" name="back" value="{esc(back)}"><button class="quiet" title="A one-off, like a car or a trip. It stays in your records but not in the totals.">'
+                    f'<input type="hidden" name="back" value="{esc(back)}">{ok}<button class="quiet" title="A one-off, like a car or a trip. It stays in your records but not in the totals.">'
                     'Leave out of the totals</button>', "row")
             + "</details>")
 
@@ -220,7 +223,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
                 f'<th>Account</th><th>Category</th><th class="n">Amount ₪</th><th></th></tr></thead><tbody>'
                 + "".join(f'<tr><td>{esc(r["txn_date"])}</td><td dir="auto">{esc(r["description"])}</td><td dir="auto" class="muted">{esc(r["account"])}</td>'
                           f'<td>{esc(r["category"])}{" ?" if r["category_status"] == "proposed" else ""}</td><td class="n">{r["spent"]:,.2f}</td>'
-                          f'<td>{_change_form(ctx, r["id"], cats, back)}</td></tr>' for r in rows)
+                          f'<td>{_change_form(ctx, r["id"], cats, back, r["budget_month"])}</td></tr>' for r in rows)
                 + '</tbody></table></div><p class="cap">Amounts are money out; refunds and income show as negative. A “?” means only proposed so far.</p></div>')
         return layout(conn, ctx, "/", "Overview", f"<h1>Overview</h1>{notice}{controls}{body}")
 
@@ -299,6 +302,15 @@ def _pace(conn, ctx, d, m, owner) -> str:
             + charts.pace_chart(this, usual, low, high, "ILS", "Spending added up through the month", m) + "</div>")
 
 
+def _budget_month(conn, ctx, spend, owner) -> str:
+    bs = budgets.get_all(conn)
+    if owner:
+        return ""
+    if not bs:
+        return "" if ctx.readonly else '<p class="cap" style="margin-top:10px"><a href="/budgets">Set monthly budgets</a> to see how much of each is used.</p>'
+    return budget_card(ctx, bs, spend, "Against your budget")
+
+
 def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
     spend = d["spend"].get(m, {})
     exp, inc, inv = d["exp_tot"].get(m, 0.0), d["inc_tot"].get(m, 0.0), d["inv"].get(m, 0.0)
@@ -308,8 +320,11 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
     if not spend and not inc:
         return _tiles(0, 0, 0) + '<div class="card" style="margin-top:14px"><p>Nothing recorded for this month yet.</p></div>'
     note = ""
+    if m in ctx.closed:
+        note = ('<p class="cap"><span class="chip good"><b>✔</b> Closed</span> You closed this month. '
+                'Changing a payment still works, but the numbers move.' + ("" if ctx.readonly else f' <a href="/close?m={m}">Reopen</a>') + '</p>')
     if m >= ctx.today[:7]:
-        note = '<p class="cap">This month isn’t over yet, so the numbers are partial.</p>'
+        note += '<p class="cap">This month isn’t over yet, so the numbers are partial.</p>'
     open_cat = q.get("open")
     rows = []
     ranked = sorted(spend.items(), key=lambda kv: -kv[1])
@@ -318,7 +333,7 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
         line_rows = "".join(
             f'<div><span>{esc(l["txn_date"][8:10])}/{esc(l["txn_date"][5:7])}</span><span><bdi dir="auto">{esc(l["description"])}</bdi>'
             f'<span class="cap"> · {esc(l["account"])}{"" if l["subcategory"] == cat else " · " + esc(l["subcategory"])}{" · ?" if l["category_status"] == "proposed" else ""}</span></span>'
-            f'<span class="n">{money(l["spent"], "ILS", 0)}</span><span>{_change_form(ctx, l["id"], cats, back)}</span></div>' for l in lines)
+            f'<span class="n">{money(l["spent"], "ILS", 0)}</span><span>{_change_form(ctx, l["id"], cats, back, l["budget_month"])}</span></div>' for l in lines)
         rows.append(f'<details class="cat"{" open" if open_cat == cat else ""}><summary><span class="tw">›</span><span dir="auto">{esc(cat)}</span>'
                     f'<span class="share hidem"><span class="t"><span style="width:{v / ranked[0][1] * 100:.0f}%"></span></span><em>{v / (exp or 1) * 100:.0f}%</em></span>'
                     f'<span class="n">{money(v)}</span><span class="n">{_vs(v, usual.get(cat, 0.0) if prior else None)}</span></summary>'
@@ -334,16 +349,16 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
     fixed = insights.fixed_costs(conn, m, d["months"], owner)
     odd = insights.unusual(conn, m, d["months"], owner, fixed)
     return (f'{note}{_tiles(inc, exp, inv)}{_pace(conn, ctx, d, m, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
-            f'<div class="cats">{head}{"".join(rows)}{foot}</div>{_worth_a_look(ctx, odd, cats, back)}{_fixed_card(fixed, m)}{income}')
+            f'<div class="cats">{head}{"".join(rows)}{foot}</div>{_budget_month(conn, ctx, spend, owner)}{_worth_a_look(ctx, odd, cats, back, m)}{_fixed_card(fixed, m)}{income}')
 
 
-def _worth_a_look(ctx, odd, cats, back) -> str:
+def _worth_a_look(ctx, odd, cats, back, month=None) -> str:
     if not odd:
         return ""
     rows = "".join(
         f'<div class="oddrow"><span>{esc(o["date"][8:10])}/{esc(o["date"][5:7])}</span><span><bdi dir="auto">{esc(o["description"])}</bdi>'
         f'<span class="cap"> · {esc(o["category"])} · {esc(o["why"])}</span></span><span class="n">{money(o["amount"], "ILS", 0)}</span>'
-        f'<span>{_change_form(ctx, o["id"], cats, back)}</span></div>' for o in odd)
+        f'<span>{_change_form(ctx, o["id"], cats, back, month)}</span></div>' for o in odd)
     return (f'<div class="card" style="margin-top:14px"><h4 style="margin:0 0 8px">Worth a look <span class="cap">payments that stand out this month</span></h4>{rows}</div>')
 
 
@@ -387,6 +402,13 @@ def _period_stacks(conn, d, have, owner) -> str:
               f'Fixed costs are the ones that repeat every month at about the same amount.</p>{fix_html}')
 
 
+def _budget_period(conn, ctx, cat_tot, n, owner) -> str:
+    bs = budgets.get_all(conn)
+    if owner or not bs:
+        return ""
+    return budget_card(ctx, bs, {c: v / n for c, v in cat_tot.items()}, "Average per month against your budget")
+
+
 def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:
     have = [x for x in win if x in d["months"]]
     if not have:
@@ -425,5 +447,5 @@ def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:
             f'<span class="n hidem">Highest month</span></div>')
     foot = f'<div class="cat foot"><span></span><span>Total</span><span class="hidem"></span><span class="n">{money(sum(cat_tot.values()) / n)}</span><span class="n cap hidem">{money(sum(cat_tot.values()))} over {n} months</span></div>'
     return (_tiles(avg_inc, avg_exp, avg_inv, "Average ").replace("Average Income", "Average income / month").replace("Average Expenses", "Average expenses / month").replace("Average Kept", "Average kept / month")
-            + note + f'<div class="card" style="margin-top:6px">{chart}</div><h3 style="margin:18px 0 6px;font-size:16px">Average per category</h3>'
+            + note + f'<div class="card" style="margin-top:6px">{chart}</div>{_budget_period(conn, ctx, cat_tot, n, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Average per category</h3>'
             f'<div class="cats">{head}{"".join(rows)}{foot}</div>')

@@ -45,3 +45,7 @@ def checks(conn: sqlite3.Connection, month: str, today: str) -> list[dict]:
     out.append({"label": "Balances are updated", "ok": not pend,
                 "detail": f"{len(pend)} account(s) need a number." if pend else "Your main accounts are up to date.", "link": "/balances"})
     return out
+
+
+def is_closed(conn: sqlite3.Connection, month: str | None) -> bool:
+    return bool(month) and month in closed_months(conn)

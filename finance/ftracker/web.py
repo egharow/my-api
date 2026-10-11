@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import sqlite3
 import re
 import secrets
 import sys
@@ -15,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, closing, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_close, views_overview, views_setup, views_trends
+from . import appmode, balances, categorize, budgets, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -126,7 +127,7 @@ class App:
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
                             data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS,
-                            readonly=remote and self.phone)
+                            readonly=remote and self.phone, closed=frozenset(closing.closed_months(conn)))
             ph = conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone()
             if ph and conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone():
                 ip = appmode.lan_address()
@@ -153,6 +154,10 @@ class App:
                     note = ""
                 if note and not ctx.flash:
                     ctx.flash, ctx.flash_kind = note, "ok"
+                try:
+                    cloudbackup.maybe_run(conn, self.home)
+                except Exception:
+                    pass
             res = self._get(conn, ctx, path, q)
             if flash:
                 res.headers.append(("Set-Cookie", "flash=; Max-Age=0; Path=/"))
@@ -198,6 +203,8 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/budgets":
+            return _html(200, views_budget.budgets_page(conn, ctx))
         if path == "/close":
             return _html(200, views_close.close_page(conn, ctx, q))
         if path == "/review":
@@ -524,6 +531,46 @@ class App:
             if path == "/watch/check":
                 note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
                 return self._redirect("/upload", note or "Nothing new in the folder.")
+            if path == "/budgets/save":
+                amounts: dict[str, float] = {}
+                for cat, amt in zip(multi.get("cat", []), multi.get("amt", [])):
+                    amt = amt.replace(",", "").replace("₪", "").strip()
+                    if not amt:
+                        continue
+                    try:
+                        amounts[cat] = float(amt)
+                    except ValueError:
+                        return self._redirect("/budgets", f"“{amt}” is not a number.", err=True)
+                n = budgets.save(conn, amounts)
+                return self._redirect("/", f"{n} budget(s) saved")
+            if path == "/budgets/fill":
+                months = summary.months_available(conn)
+                done = [m for m in months if m < self._today()[:7]]
+                usual = budgets.usual(conn, (done or months)[-6:])
+                n = budgets.save(conn, {c: -(-v // 50) * 50 for c, v in usual.items() if c != "Uncategorised" and v >= 50})
+                return self._redirect("/budgets", f"Filled in {n} budget(s) from your usual spending. Change any of them and save.")
+            if path == "/backup/set":
+                try:
+                    chosen = cloudbackup.set_folder(conn, self.home, form.get("folder", ""))
+                except ValueError as exc:
+                    return self._redirect("/setup", str(exc), err=True)
+                note = cloudbackup.run(conn, self.home, "first")
+                return self._redirect("/setup", note or f"Backing up to {chosen}", err="try again" in note)
+            if path == "/backup/now":
+                note = cloudbackup.run(conn, self.home, "manual")
+                return self._redirect("/setup", note or "Choose a backup folder first.", err=not note or "try again" in note)
+            if path == "/backup/clear":
+                cloudbackup.clear(conn)
+                return self._redirect("/setup", "No longer backing up to a folder.")
+            if path == "/backup/restore":
+                if form.get("sure") != "1" or "|" not in form.get("pick", ""):
+                    return self._redirect("/setup", "Tick the box to confirm, then choose a backup.", err=True)
+                where, name = form["pick"].split("|", 1)
+                try:
+                    msg = cloudbackup.restore(conn, self.home, where, name)
+                except (ValueError, sqlite3.Error, OSError) as exc:
+                    return self._redirect("/setup", f"Could not restore: {exc}", err=True)
+                return self._redirect("/", msg)
             if path == "/watch/clear":
                 watchfolder.clear(conn)
                 return self._redirect("/setup", "No longer watching a folder.")
@@ -531,6 +578,10 @@ class App:
                 shown = [int(x) for x in multi.get("shown", []) if x.isdigit()]
                 balances.set_in_wealth(conn, shown, {a for a in shown if form.get(f"inc_{a}") == "1"})
                 return self._redirect("/wealth", "Saved. Net worth now counts only the accounts you ticked.")
+            if path in ("/line/category", "/line/leaveout") and form.get("id", "").isdigit() and not form.get("ok_closed"):
+                row = conn.execute("SELECT budget_month FROM transactions WHERE id = ?", (int(form["id"]),)).fetchone()
+                if row and closing.is_closed(conn, row[0]):
+                    return self._redirect("/", f"{row[0]} is closed. Reopen it first, or tick “this month is closed” on the payment.", err=True)
             if path == "/line/category":
                 back = form.get("back", "/")
                 if not back.startswith("/") or back.startswith("//") or "\n" in back or "://" in back:

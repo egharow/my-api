@@ -1,8 +1,10 @@
 """Pages that replace the old command-line steps: dropping files, importing the old sheet, and setup."""
 import sqlite3
 from html import escape as esc
+from pathlib import Path
 
-from . import categorize, charts, sheet_import, watchfolder
+from . import categorize, charts, cloudbackup, sheet_import, watchfolder
+from .config import Home
 from .views import Ctx, _form, layout
 
 DROP_JS = """
@@ -106,13 +108,36 @@ def history_preview_page(conn: sqlite3.Connection, ctx: Ctx, data: "sheet_import
 
 # ---- setup --------------------------------------------------------------------------------------
 
+def _backup_card(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    folder = cloudbackup.get(conn)
+    home = Home(Path(ctx.data_root))
+    backs = cloudbackup.available(conn, home)
+    opts = "".join(f'<option value="{esc(b["where"])}|{esc(b["name"])}">{esc(b["when"])} · {esc(b["where"])} · {b["size"] // 1024:,} KB</option>' for b in backs)
+    status = (f'<p>Backing up to <code>{esc(folder)}\\FinanceBackup</code></p><p class="muted">{esc(cloudbackup.last_result(conn)) or "Nothing backed up yet."}</p>'
+              + _form(ctx, "/backup/now", '<button>Back up now</button>', "inline") + " "
+              + _form(ctx, "/backup/clear", '<button class="quiet">Stop backing up there</button>', "inline") if folder else
+              '<p class="muted">Not set up yet. Your data is only on this computer until you choose a folder.</p>')
+    restore = (_form(ctx, "/backup/restore",
+                     f'<p><label>Go back to <select name="pick">{opts}</select></label></p>'
+                     '<p class="row"><label class="cap"><input type="checkbox" name="sure" value="1" required> I understand this replaces what is in the app now. '
+                     'What I have now is saved first, so I can undo it.</label></p><button class="quiet">Restore</button>')
+               if backs else '<p class="muted">No backups to restore from yet.</p>')
+    return ('<section class="card" style="margin-top:12px"><h2>Backups (Google Drive)</h2>'
+            '<p class="muted">Choose a folder in Google Drive for desktop. The app puts a copy of your data there after every import and a few times a day, '
+            'and a copy of each statement you drop in, so Drive holds everything. Only snapshots go to Drive, never the live data file.</p>'
+            + status
+            + _form(ctx, "/backup/set", f'<input name="folder" style="width:100%;max-width:520px" placeholder="G:\\My Drive" value="{esc(folder or "")}" required> '
+                    f'<button>{"Change folder" if folder else "Back up to this folder"}</button>', "row")
+            + '<h3 style="margin-top:18px">Restore</h3>' + restore + "</section>")
+
+
 def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     who_opts = "".join(f'<option value="{esc(o)}"{" selected" if o == ctx.who else ""}>{esc(o)}</option>' for o in ctx.owners)
     out = ["<h1>Settings</h1>",
            ('<div class="card" style="margin-bottom:12px"><b>Who is using the app?</b> <span class="muted">Used to sign your comments and approvals.</span> '
             + _form(ctx, "/who", f'<select name="who">{who_opts}</select> <button class="quiet">Save</button>', "inline") + "</div>") if ctx.owners else "",
            '<div class="card" style="margin-bottom:12px"><div class="row"><a href="/items">Problems to check</a> · <a href="/imports">Imports and submit history</a> · '
-           '<a href="/balances">Balances and dollar rate</a> · <a href="/goals">Goals</a> · <a href="/sheet">Google Sheet (optional)</a></div></div>']
+           '<a href="/balances">Balances and dollar rate</a> · <a href="/budgets">Budgets</a> · <a href="/goals">Goals</a> · <a href="/sheet">Google Sheet (optional)</a></div></div>']
     if ctx.starter and not conn.execute("SELECT 1 FROM settings WHERE key = 'seed_applied'").fetchone() and not conn.execute("SELECT 1 FROM owners").fetchone():
         out.append('<div class="banner"><b>Your starter setup is ready.</b> It adds the people, accounts and income rules prepared for you. '
                    + _form(ctx, "/setup/starter", "<button>Apply it</button>", "inline") + "</div>")
@@ -244,6 +269,7 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                   + _form(ctx, "/watch/clear", '<button class="quiet">Stop watching</button>', "inline") if folder else "")
                + _form(ctx, "/watch/set", f'<input name="folder" style="width:100%;max-width:520px" placeholder="G:\\My Drive\\Statements" '
                        f'value="{esc(folder or "")}" required> <button>{"Change folder" if folder else "Watch this folder"}</button>', "row") + "</section>")
+    out.append(_backup_card(conn, ctx))
     shortcut = (_form(ctx, "/setup/shortcut", "<button>Put an icon on my desktop</button>", "inline") if ctx.can_shortcut else "")
     out.append('<section class="card" style="margin-top:12px"><h2>This app</h2>'
                f'<p>Your data lives in <code>{esc(ctx.data_root)}</code> on this computer. Statements you drop in are filed under <code>archive</code> there, and a backup is made before every import.</p>'

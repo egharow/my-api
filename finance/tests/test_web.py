@@ -436,3 +436,49 @@ def test_new_charts_render(app, conn):
     assert charts.stacked_area([("2026-01-01", [1.0])], ["a"], "ILS", "x").startswith("<p")
     page = text(get(app, "/?p=6"))
     assert "Where it went, month by month" in page or "Based on the" in page
+
+
+def test_backup_to_a_folder_copies_database_and_statements_and_can_restore(app, conn, home, tmp_path):
+    from ftracker import cloudbackup
+    drive = tmp_path / "drive"; drive.mkdir()
+    assert "not found" in _flash(post(app, "/backup/set", {"folder": str(tmp_path / "nope")}))
+    res = post(app, "/backup/set", {"folder": str(drive)})
+    assert res.status == 303 and cloudbackup.get(conn) == str(drive.resolve())
+    dbs = list((drive / "FinanceBackup" / "database").glob("finance_*.db"))
+    assert dbs and list((drive / "FinanceBackup" / "statements").rglob("*"))          # the dropped statements are in Drive too
+    assert "Backing up to" in text(get(app, "/setup")) and "Restore" in text(get(app, "/setup"))
+    conn.execute("INSERT INTO settings (key, value) VALUES ('marker', 'before')"); conn.commit()
+    post(app, "/backup/now", {})
+    conn.execute("UPDATE settings SET value = 'changed' WHERE key = 'marker'"); conn.commit()
+    newest = cloudbackup.available(conn, home)[0]
+    assert "tick the box" in _flash(post(app, "/backup/restore", {"pick": f"{newest['where']}|{newest['name']}"})).lower()
+    res = post(app, "/backup/restore", {"pick": f"{newest['where']}|{newest['name']}", "sure": "1"})
+    assert res.status == 303
+    assert conn.execute("SELECT value FROM settings WHERE key = 'marker'").fetchone()[0] == "before"
+    assert any("before-restore" in b["name"] for b in cloudbackup.available(conn, home))
+
+
+def test_budgets_are_saved_and_compared_with_spending(app, conn):
+    from ftracker import budgets
+    page = text(get(app, "/budgets"))
+    assert "Budget per month" in page
+    res = post(app, "/budgets/fill", {})
+    assert res.status == 303 and budgets.get_all(conn)
+    cat = next(iter(budgets.get_all(conn)))
+    post(app, "/budgets/save", {"cat": [cat, "Fun"], "amt": ["1,000", ""]})
+    assert budgets.get_all(conn) == {cat: 1000.0}
+    assert "Against your budget" in text(get(app, "/?p=month&m=2026-10")) or "Against your budget" in text(get(app, "/?p=month&m=2026-09"))
+    assert "is not a number" in _flash(post(app, "/budgets/save", {"cat": [cat], "amt": ["abc"]}))
+
+
+def test_a_closed_month_asks_before_a_payment_in_it_is_changed(app, conn):
+    from ftracker import closing
+    line = conn.execute("SELECT id, budget_month FROM transactions WHERE description = 'ONE OFF SERVICE'").fetchone()
+    from ftracker import categorize
+    categorize.approve(conn, [line["id"]], "Food")
+    closing.set_closed(conn, line["budget_month"], True)
+    page = text(get(app, f"/?p=month&m={line['budget_month']}"))
+    assert "Closed" in page and "ok_closed" in page
+    assert "is closed" in _flash(post(app, "/line/category", {"id": str(line["id"]), "category": "Fun"}))
+    res = post(app, "/line/category", {"id": str(line["id"]), "category": "Fun", "ok_closed": "1"})
+    assert conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.id = ?", (line["id"],)).fetchone()[0] == "Fun"

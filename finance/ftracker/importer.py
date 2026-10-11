@@ -259,4 +259,7 @@ def import_inbox(home: Home, conn: sqlite3.Connection, today: date | None = None
 
     if report.batch_id is not None:
         reconcile.run(conn, report.batch_id, today.isoformat())
+    if report.imported:
+        from . import cloudbackup
+        cloudbackup.after_import(conn, home)          # keep the originals and the database in your backup folder too
     return report

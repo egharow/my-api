@@ -27,6 +27,7 @@ class Ctx:
     phone_url: str = ""
     phone_pin: str = ""
     phone_anywhere: str = ""
+    closed: frozenset = frozenset()  # months you closed
 
 
 CSS = """
