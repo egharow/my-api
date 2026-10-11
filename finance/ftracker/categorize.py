@@ -192,9 +192,10 @@ def large_unreviewed(conn: sqlite3.Connection, batch_id: int | None = None):
 def approve(conn: sqlite3.Connection, txn_ids: list[int], category_name: str,
             learn: bool = False, actor: str = "user") -> int:
     """Set a category on transactions. With learn=True, also save a rule for the merchant."""
-    cat = conn.execute("SELECT id FROM categories WHERE name = ?", (category_name,)).fetchone()
+    cat = conn.execute("SELECT id, kind FROM categories WHERE name = ?", (category_name,)).fetchone()
     if not cat:
         raise ValueError(f"unknown category {category_name!r}")
+    cat_kind = cat["kind"]
     _ensure_editable(conn, txn_ids)
     for tid in txn_ids:
         conn.execute(
@@ -202,6 +203,8 @@ def approve(conn: sqlite3.Connection, txn_ids: list[int], category_name: str,
                       confidence = 1.0, proposal_basis = 'approved by you' WHERE id = ?""",
             (cat["id"], tid))
         audit(conn, "approve_category", "transaction", tid, category_name, actor)
+        if cat_kind in ("expense", "fee", "debt"):             # a payment moved out of a transfer category is an ordinary payment
+            conn.execute("UPDATE transactions SET kind = 'purchase' WHERE id = ? AND kind = 'transfer'", (tid,))
     if learn and txn_ids:
         desc = conn.execute("SELECT description_norm FROM transactions WHERE id = ?",
                             (txn_ids[0],)).fetchone()[0]

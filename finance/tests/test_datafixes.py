@@ -135,3 +135,26 @@ def test_loan_payment_rule_and_stale_transfer_flags_close(conn, home, tmp_path):
     row = conn.execute("SELECT c.name, t.category_status, t.kind FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.id = ?", (tid,)).fetchone()
     assert (row["name"], row["category_status"], row["kind"]) == ("Loans", "approved", "other")
     assert conn.execute("SELECT status FROM discrepancies WHERE fingerprint = ?", (f"xfer:{tid}",)).fetchone()[0] == "resolved"
+
+
+def test_a_payment_moved_out_of_a_transfer_category_becomes_an_ordinary_expense(conn, home, tmp_path):
+    import json as _json
+    conn.execute("INSERT INTO accounts (kind, issuer, label, last4, currency, created_at) VALUES ('bank','leumi','L','1','ILS','x')")
+    a = conn.execute("SELECT id FROM accounts WHERE kind='bank'").fetchone()[0]
+    conn.execute("INSERT INTO batches (status, created_at) VALUES ('draft','x')")
+    b = conn.execute("SELECT id FROM batches").fetchone()[0]
+    household = conn.execute("SELECT id FROM categories WHERE name = 'Transfer to household'").fetchone()[0]
+    conn.execute("""INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description, description_norm, amount, currency,
+                    category_id, category_status, kind, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 (b, a, "k1", "2026-08-21", "2026-08", 'העברת זה"ב', 'העברת זהב', -42000.0, "ILS", household, "approved", "transfer", "x"))
+    conn.commit()
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(_json.dumps([
+        {"id": "d", "action": "delete_rule", "pattern": "העברת זה\"ב"},
+        {"id": "r", "action": "recategorize_line", "description": "העברת זה\"ב", "date": "2026-08-21", "amount": -42000, "category": "Car"}]), encoding="utf-8")
+    lines = datafixes.apply(conn, home, app, date(2026, 10, 11))
+    assert any("moved to Car" in l for l in lines)
+    row = conn.execute("SELECT c.name, t.kind FROM transactions t JOIN categories c ON c.id = t.category_id").fetchone()
+    assert (row["name"], row["kind"]) == ("Car", "purchase")
+    from ftracker import summary
+    assert dict((r["category"], r["spent"]) for r in summary.spending_by_category(conn, "2026-08"))["Car"] == 42000.0
