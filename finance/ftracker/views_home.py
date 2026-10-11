@@ -91,7 +91,7 @@ def home(conn: sqlite3.Connection, ctx: Ctx) -> str:
     out = ['<h1>This round</h1>']
     loaded = firstrun.pending_notice(conn)
     if loaded:
-        out.append('<div class="banner" style="border-color:var(--good)"><b>Your starting data is loaded.</b><ul>'
+        out.append('<div class="banner good"><b>Your starting data is loaded.</b><ul>'
                    + "".join(f"<li>{esc(x)}</li>" for x in loaded) + "</ul>"
                    + _form(ctx, "/seed/dismiss", "<button class=quiet>Got it</button>", "inline") + "</div>")
     out.append(f'<section class="card">{steps}</section>')
@@ -119,7 +119,7 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     cl = expected.checklist(conn, ctx.today)
     c = counts(conn)
     done = cl["done"] == cl["total"]
-    head = (f'<div class="banner" style="border-color:var(--good)"><b>Everything on the list is in.</b></div>' if done else
+    head = (f'<div class="banner good"><b>Everything on the list is in.</b></div>' if done else
             f'<p class="muted">{cl["done"]} of {cl["total"]} received. Drop a file and its box is ticked automatically.</p>')
     folder = watchfolder.get(conn)
     watch = (f'<p class="muted">Also picking up statements from <code>{esc(folder)}</code>. ' + _form(ctx, "/watch/check", '<button class="quiet">Check it now</button>', "inline") + "</p>"

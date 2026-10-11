@@ -162,6 +162,35 @@ input:focus,select:focus{border-color:var(--accent);outline:0;box-shadow:0 0 0 3
 .btnlink:hover{background:var(--accent);color:#fff}
 .chip.good{background:color-mix(in srgb,var(--good) 10%,transparent);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
 @media (max-width:640px){.trio b{font-size:24px}.cats{padding:4px 12px}}
+/* design pass: neutrals tinted toward the accent, flat surfaces, one summary strip, tone shown as tint not as a side rail */
+:root{--page:#f4f5f8;--surface:#ffffff;--ink:#12151b;--ink2:#444b57;--muted:#677080;--grid:#e3e6ec;--axis:#c3c9d3;--border:rgba(18,21,27,.09);--accent:#2a6fd0;
+--tone-warn:#fff6e0;--tone-good:#eaf6ec;--tone-bad:#fdeceb}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--page:#0d0f13;--surface:#161a20;--ink:#f1f3f7;--ink2:#c2c8d2;--muted:#979faa;--grid:#252a32;--axis:#38404a;--border:rgba(255,255,255,.09);--accent:#5a9bf0;
+--tone-warn:#2b2412;--tone-good:#14261a;--tone-bad:#2d1818}}
+:root[data-theme="dark"]{--page:#0d0f13;--surface:#161a20;--ink:#f1f3f7;--ink2:#c2c8d2;--muted:#979faa;--grid:#252a32;--axis:#38404a;--border:rgba(255,255,255,.09);--accent:#5a9bf0;
+--tone-warn:#2b2412;--tone-good:#14261a;--tone-bad:#2d1818}
+body{font-variant-numeric:tabular-nums}
+h1,h2,h3,h4{text-wrap:balance}
+.card,.cats,.tile{box-shadow:none;border-color:var(--border)}
+header{box-shadow:0 1px 0 var(--border)}
+.trio{gap:0;background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin:10px 0 8px}
+.trio>div{background:transparent;border:0;border-radius:0;box-shadow:none;padding:16px 20px;border-left:1px solid var(--grid)}
+.trio>div:first-child{border-left:0}.trio>div::before{display:none}
+.trio small{display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.06em;font-size:11.5px;font-weight:600}
+.trio small.k{text-transform:none;letter-spacing:0;font-weight:400;display:block}
+.trio>div:nth-child(1)>small:first-child::before,.trio>div:nth-child(2)>small:first-child::before,.trio>div:nth-child(3)>small:first-child::before{content:"";width:9px;height:9px;border-radius:50%}
+.trio>div:nth-child(1)>small:first-child::before{background:var(--s1)}.trio>div:nth-child(2)>small:first-child::before{background:var(--s2)}.trio>div:nth-child(3)>small:first-child::before{background:var(--good)}
+.trio b{display:block;font-size:30px;font-weight:650;letter-spacing:-.015em;margin-top:2px}.trio b.neg{color:var(--critical)}
+@media (max-width:640px){.trio>div{border-left:0;border-top:1px solid var(--grid);padding:12px 16px}.trio>div:first-child{border-top:0}.trio b{font-size:24px}}
+.banner,.flash{border:1px solid var(--border);border-left:1px solid var(--border);background:var(--tone-warn);box-shadow:none;border-radius:10px}
+.banner.good{background:var(--tone-good)}.flash{background:var(--surface)}.flash.err{background:var(--tone-bad);border-left-color:var(--border)}
+.adjust{border-style:solid;border-color:var(--border);background:transparent}
+.cats{border-radius:14px}.cat.head{color:var(--muted)}
+.todo .chip{background:var(--surface);border-color:var(--border)}
+.todo .chip b{background:var(--accent);color:#fff;border-radius:999px;padding:0 7px;margin-right:4px;font-size:12px}
+button:not(.quiet){background:var(--accent);border-color:var(--accent)}
+nav a.on{background:color-mix(in srgb,var(--accent) 13%,transparent)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 @media print{header,.todo,button,.modes,#tip{display:none}body{background:#fff}}
 """
 
@@ -260,7 +289,7 @@ def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     from . import firstrun
     loaded = firstrun.pending_notice(conn)
     if loaded:
-        out.append('<div class="banner" style="border-color:var(--good)"><b>Your starting data is loaded.</b><ul>' + "".join(f"<li>{esc(x)}</li>" for x in loaded)
+        out.append('<div class="banner good"><b>Your starting data is loaded.</b><ul>' + "".join(f"<li>{esc(x)}</li>" for x in loaded)
                    + "</ul>Everything is a draft: check the <a href='/review'>Review</a> tab, then submit on the <a href='/imports'>Imports</a> tab. "
                    + _form(ctx, "/seed/dismiss", "<button class=quiet>Got it</button>", "inline") + "</div>")
     drafts = conn.execute("SELECT COUNT(*) FROM batches WHERE status != 'committed'").fetchone()[0]
@@ -405,7 +434,7 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
            WHERE t.category_status = 'approved' AND t.proposal_basis LIKE 'approved by itself%' AND b.status != 'committed'
            GROUP BY t.description_norm, c.name ORDER BY n DESC""").fetchall()
     if auto:
-        out.append('<details class="banner" style="border-left-color:var(--good)"><summary>'
+        out.append('<details class="banner good"><summary>'
                    f'{sum(a["n"] for a in auto)} payment(s) were approved by themselves</summary>'
                    '<p class="cap">You had put these merchants in the same category at least 3 times. If one is wrong, '
                    'open its category on Overview and change it.</p><ul>'

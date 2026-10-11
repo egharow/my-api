@@ -94,7 +94,7 @@ def _tiles(inc: float, exp: float, inv: float, label: str = "") -> str:
     return ('<div class="trio">'
             f'<div><small>{label}Income</small><b>{money(inc)}</b></div>'
             f'<div><small>{label}Expenses</small><b>{money(exp)}</b></div>'
-            f'<div><small>{label}Kept</small><b>{money(kept)}</b><small class="k">{esc(sub if kept or inv else "")}</small></div></div>')
+            f'<div><small>{label}Kept</small><b class="{"neg" if kept < 0 else ""}">{money(kept)}</b><small class="k">{esc(sub if kept or inv else "")}</small></div></div>')
 
 
 def _dataline(conn: sqlite3.Connection, today: str) -> str:
@@ -186,7 +186,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     from . import firstrun
     loaded = firstrun.pending_notice(conn)
     loaded = None if ctx.readonly else loaded
-    notice = ('<div class="banner" style="border-left-color:var(--good)"><details><summary>Your starting data is loaded</summary><ul>'
+    notice = ('<div class="banner good"><details><summary>Your starting data is loaded</summary><ul>'
               + "".join(f"<li>{esc(x)}</li>" for x in loaded) + "</ul></details>"
               + _form(ctx, "/seed/dismiss", "<button class=quiet>Got it</button>", "inline") + "</div>") if loaded else ""
     from . import sheetsync
