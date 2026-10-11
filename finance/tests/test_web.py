@@ -395,3 +395,33 @@ def test_close_the_month_checks_then_marks_it_and_can_reopen(app, conn):
     post(app, "/close/do", {"m": "2026-09", "reopen": "1"})
     assert "2026-09" not in closing.closed_months(conn)
     assert get(app, "/close").status == 200
+
+
+def test_balances_can_keep_an_account_as_it_was(app, conn):
+    acct = conn.execute("SELECT id FROM accounts WHERE label = 'ETRADE'").fetchone()[0]
+    last = conn.execute("SELECT amount FROM balances WHERE account_id = ? ORDER BY as_of DESC LIMIT 1", (acct,)).fetchone()[0]
+    res = post(app, "/balances", {"as_of": "2026-10-05", f"same_{acct}": "1"})
+    assert "1 kept as they were" in _flash(res)
+    assert conn.execute("SELECT amount FROM balances WHERE account_id = ? AND as_of = '2026-10-05'", (acct,)).fetchone()[0] == last
+    res = post(app, "/balances", {"as_of": "2026-10-06", "same_all": "1", f"bal_{acct}": "1"})
+    assert "kept as they were" in _flash(res)
+    assert conn.execute("SELECT amount FROM balances WHERE account_id = ? AND as_of = '2026-10-06'", (acct,)).fetchone()[0] == 1
+
+
+def test_a_merchant_you_approved_three_times_is_approved_by_itself(app, conn, home, monkeypatch):
+    from ftracker import categorize
+    for i in range(3):
+        run_import(home, conn, monkeypatch, [(f"h{i}.xlsx", card_file(last4="2222", billing=date(2026, 11 + i // 3, 2 + i),
+                   txns=[card_txn(date(2026, 10, 3 + i), "KIOSK HABIT", 20.0 + i, f"hb{i}")]))])
+        ids = [r[0] for r in conn.execute("SELECT id FROM transactions WHERE description = 'KIOSK HABIT' AND category_status = 'proposed'")]
+        categorize.approve(conn, ids, "Fun")
+    run_import(home, conn, monkeypatch, [("h9.xlsx", card_file(last4="2222", billing=date(2026, 12, 2),
+               txns=[card_txn(date(2026, 11, 20), "KIOSK HABIT", 33.0, "hb9"), card_txn(date(2026, 11, 21), "NEVER SEEN", 33.0, "hb10")]))])
+    row = conn.execute("SELECT category_status, proposal_basis FROM transactions WHERE voucher = 'hb9'").fetchone()
+    assert row["category_status"] == "approved" and "by itself" in row["proposal_basis"]
+    assert conn.execute("SELECT category_status FROM transactions WHERE voucher = 'hb10'").fetchone()[0] == "proposed"
+    assert "approved by themselves" in text(get(app, "/review"))
+
+
+def test_overview_says_how_far_the_statements_go(app):
+    assert "Statements:" in text(get(app, "/"))

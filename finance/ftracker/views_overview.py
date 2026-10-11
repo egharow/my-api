@@ -2,6 +2,7 @@
 
 One page, two ways to look: a single month, or a period (6 months, 12 months, or a range you choose) to see averages.
 """
+import re
 import sqlite3
 from datetime import date
 from html import escape as esc
@@ -94,6 +95,38 @@ def _tiles(inc: float, exp: float, inv: float, label: str = "") -> str:
             f'<div><small>{label}Income</small><b>{money(inc)}</b></div>'
             f'<div><small>{label}Expenses</small><b>{money(exp)}</b></div>'
             f'<div><small>{label}Kept</small><b>{money(kept)}</b><small class="k">{esc(sub if kept or inv else "")}</small></div></div>')
+
+
+def _dataline(conn: sqlite3.Connection, today: str) -> str:
+    """One line: how far the statements go, and what is due next."""
+    bank = conn.execute("SELECT MAX(s.period_end) FROM statements s JOIN accounts a ON a.id = s.account_id WHERE a.kind = 'bank' AND a.active = 1").fetchone()[0]
+    card = conn.execute("SELECT MAX(s.billing_date) FROM statements s JOIN accounts a ON a.id = s.account_id WHERE a.kind = 'card' AND a.active = 1").fetchone()[0]
+    parts = []
+    if bank:
+        parts.append(f"bank to <b>{dmy(bank)}</b>")
+    if card:
+        parts.append(f"cards billed to <b>{dmy(card)}</b>")
+    if not parts:
+        return ""
+    cl = expected.checklist(conn, today)
+    soon, late = [], []
+    for g in cl["groups"]:
+        for i in g["items"]:
+            found = re.search(r"around (\d{4}-\d{2}-\d{2})", i.get("detail") or "")
+            if not found:
+                continue
+            when = found.group(1)
+            if i["status"] == "waiting":
+                soon.append((when, i["label"]))
+            elif i["status"] == "todo" and not i.get("children"):
+                late.append((when, i["label"]))
+    text = "Statements: " + ", ".join(parts) + "."
+    if late:
+        text += " Overdue: " + ", ".join(f"{esc(l)} ({dmy(w)})" for w, l in sorted(late)[:3]) + "."
+    if soon:
+        w, l = min(soon)
+        text += f" Next: {esc(l)} around {dmy(w)}."
+    return f'<p class="dataline">{text}</p>'
 
 
 def _tasks(conn: sqlite3.Connection, ctx: Ctx) -> str:
@@ -196,7 +229,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     else:
         win = months_between(frm, to) if mode == "custom" else [x for x in months if x <= end][-int(mode):]
         body = _period_view(conn, ctx, d, win, owner, base, mode, q)
-    return layout(conn, ctx, "/", "Overview", f"<h1>Overview</h1>{notice}{controls}{body}{vit}{_tasks(conn, ctx)}")
+    return layout(conn, ctx, "/", "Overview", f"<h1>Overview</h1>{notice}{controls}{_dataline(conn, ctx.today)}{body}{vit}{_tasks(conn, ctx)}")
 
 
 def _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) -> str:

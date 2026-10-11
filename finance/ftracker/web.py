@@ -267,6 +267,16 @@ class App:
             return self._redirect("/history", "That preview has expired. Choose the file again.", err=True)
         return _html(200, views_setup.history_preview_page(conn, ctx, sheet_import.parse_workbook(path), token))
 
+    @staticmethod
+    def _auto_pass(conn) -> int:
+        """Re-suggest the waiting lines now that you approved more; returns how many became approved by themselves."""
+        def n():
+            return conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status = 'approved' AND proposal_basis LIKE 'approved by itself%'").fetchone()[0]
+        before = n()
+        categorize.resuggest(conn)
+        conn.commit()
+        return n() - before
+
     def _redirect(self, to: str, msg: str = "", err: bool = False, cookies=None) -> Response:
         h = [("Location", to)]
         if msg:
@@ -310,16 +320,21 @@ class App:
                            WHERE t.category_status = 'proposed' AND t.description_norm = ? AND c.name = ? AND b.status != 'committed'""", (key, cat))]
                     if ids:
                         done += categorize.approve(conn, ids, target, learn=learn, actor=who)
+                auto = self._auto_pass(conn)
                 msg = f"{done} line(s) approved from {len(picks) - skipped} merchant(s)" + (" and remembered" if learn else "")
                 if skipped:
                     msg += f". {skipped} had no suggestion: pick a category for them"
+                if auto:
+                    msg += f". {auto} more approved by themselves (merchants you have approved 3+ times)"
                 return self._redirect("/review", msg, err=bool(skipped and not done))
             if path == "/approve":
                 ids = [r[0] for r in conn.execute(
                     """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id
                        WHERE t.category_status = 'proposed' AND t.description_norm = ? AND b.status != 'committed'""", (form["key"],))]
                 n = categorize.approve(conn, ids, form["category"], learn=form.get("learn") == "1", actor=who)
-                return self._redirect("/review", f"{n} line(s) set to {form['category']}" + (" and remembered" if form.get("learn") == "1" else ""))
+                auto = self._auto_pass(conn)
+                return self._redirect("/review", f"{n} line(s) set to {form['category']}" + (" and remembered" if form.get("learn") == "1" else "")
+                                      + (f". {auto} more approved by themselves" if auto else ""))
             m = path.split("/")
             if len(m) == 4 and m[1] == "item" and m[3] == "comment":
                 item_id = int(m[2])
@@ -358,7 +373,16 @@ class App:
                         amount = float(value.replace(",", "").replace("₪", "").replace("$", "").strip())
                         balances.set_balance_for(conn, int(key[4:]), amount, form.get("as_of") or self._today())
                         saved += 1
-                return self._redirect("/balances", f"{saved} balance(s) saved")
+                as_of = form.get("as_of") or self._today()
+                kept = 0
+                for p_ in balances.pending(conn, as_of):
+                    key = f"bal_{p_['account']['id']}"
+                    if form.get(key, "").strip() or not p_["latest"]:
+                        continue
+                    if form.get(f"same_{p_['account']['id']}") == "1" or (form.get("same_all") == "1" and not p_["folded"] and not p_["current"]):
+                        balances.set_balance_for(conn, p_["account"]["id"], p_["latest"]["amount"], as_of)
+                        kept += 1
+                return self._redirect("/balances", f"{saved} balance(s) saved" + (f", {kept} kept as they were" if kept else ""))
             back = form.get("back") if form.get("back") in ("/upload", "/sheet") else "/sheet"
             if path == "/sheet/link":
                 sheetsync.link(conn, form.get("url", ""))

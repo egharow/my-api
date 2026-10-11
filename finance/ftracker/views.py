@@ -393,6 +393,18 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     out = ["<h1>Review categories</h1>",
            '<p class="muted">Each line is a merchant. The proposed category is a suggestion: approve it or pick another. '
            "Tick “remember” and the app will use your choice for this merchant from now on.</p>"]
+    auto = conn.execute(
+        """SELECT t.description_norm AS k, MIN(t.description) AS d, c.name AS cat, COUNT(*) AS n FROM transactions t
+           JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
+           WHERE t.category_status = 'approved' AND t.proposal_basis LIKE 'approved by itself%' AND b.status != 'committed'
+           GROUP BY t.description_norm, c.name ORDER BY n DESC""").fetchall()
+    if auto:
+        out.append('<details class="banner" style="border-left-color:var(--good)"><summary>'
+                   f'{sum(a["n"] for a in auto)} payment(s) were approved by themselves</summary>'
+                   '<p class="cap">You had put these merchants in the same category at least 3 times. If one is wrong, '
+                   'open its category on Overview and change it.</p><ul>'
+                   + "".join(f'<li dir="auto"><bdi dir="auto">{esc(a["d"])}</bdi> → {esc(a["cat"])} <span class="cap">({a["n"]})</span></li>' for a in auto[:60])
+                   + "</ul></details>")
     tab = lambda key, label, n: (f'<a href="/review?show={key}"{" style=font-weight:700" if show == key else ""}>{label} ({n})</a>')
     out.append(f'<p>{tab("match", "With a suggestion", n_match)} &nbsp;·&nbsp; {tab("none", "No suggestion yet", n_none)} &nbsp;·&nbsp; '
                f'{tab("all", "Everything", n_match + n_none)}</p>')
@@ -530,18 +542,21 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
         (rows if n < above else folded_rows).append(f'<tr><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td>'
                     f'<td class="n">{esc(money(l["amount"], l["currency"]) if l else "–")}</td>'
                     f'<td>{esc(l["as_of"]) if l else ""}{" ▲ old" if stale else ""}</td>'
-                    f'<td><input name="bal_{a["id"]}" inputmode="decimal" size="12" placeholder="new value"> {esc(a["currency"])}</td></tr>')
+                    f'<td><input name="bal_{a["id"]}" inputmode="decimal" size="12" placeholder="new value"> {esc(a["currency"])}</td>'
+                    + (f'<td><label class="cap"><input type="checkbox" name="same_{a["id"]}" value="1"> same</label></td>' if l else "<td></td>") + '</tr>')
     banner = (f'<div class="banner">Balances are due{" (last updated " + esc(last) + ")" if last else ""}.</div>' if due else "")
     kinds = "".join(f"<option>{k}</option>" for k in ("bank", "investment", "pension", "savings", "real_estate", "loan", "other"))
     owner_opts = '<option value="">(none)</option>' + "".join(f"<option>{esc(o)}</option>" for o in ctx.owners)
     form = _form(ctx, "/balances",
                  f'<p>Date of these numbers: <input type="date" name="as_of" value="{esc(ctx.today)}"></p>'
-                 f'<div style="overflow-x:auto"><table><thead><tr><th>Account</th><th>Type</th><th>Owner</th><th class="n">Last value</th><th>As of</th><th>New value</th></tr></thead>'
+                 f'<div style="overflow-x:auto"><table><thead><tr><th>Account</th><th>Type</th><th>Owner</th><th class="n">Last value</th><th>As of</th><th>New value</th><th title="Nothing changed since last time">Unchanged?</th></tr></thead>'
                  f'<tbody>{"".join(rows)}</tbody></table>'
                  + (f'<details style="margin-top:6px"><summary class="muted">{len(folded_rows)} more account(s), shown only when expanded</summary>'
                     f'<table><tbody>{"".join(folded_rows)}</tbody></table></details>' if folded_rows else "")
-                 + f'</div><p><button>Save the values I filled in</button> '
-                 f'<span class="muted">Leave a row empty to keep its last value. Loans can be entered as positive numbers.</span></p>')
+                 + f'</div><p class="row"><button>Save</button> <button class="quiet" name="same_all" value="1" title="Type the ones that changed, then press this">'
+                 f'Save, and keep every other account as it was</button></p>'
+                 f'<p class="muted">Type only what changed. Tick “same” for an account that did not change, or use the second button to keep all the rest. '
+                 f'Loans can be entered as positive numbers.</p>')
     add = _form(ctx, "/accounts", f'<div class="row"><input name="label" placeholder="Account name" required> <select name="kind">{kinds}</select> '
                 f'<select name="currency"><option>ILS</option><option>USD</option></select> <select name="owner">{owner_opts}</select> <button class="quiet">Add account</button></div>')
     cur_rate = fx.current_rate(conn)

@@ -61,6 +61,22 @@ def _similar_past(conn: sqlite3.Connection, desc: str):
     return best
 
 
+HABIT_MIN = 3                      # approved this many times, always into the same category
+
+
+def _habit(conn: sqlite3.Connection, desc_norm: str, amount: float):
+    """(category_id, n) when you have approved this exact merchant at least HABIT_MIN times, always the same way."""
+    if abs(amount) >= LARGE_ITEM:
+        return None
+    rows = conn.execute(
+        """SELECT category_id, COUNT(*) AS n FROM transactions
+           WHERE description_norm = ? AND category_status = 'approved' AND proposal_basis = 'approved by you'
+             AND ((amount < 0) = (? < 0)) GROUP BY category_id""", (desc_norm, amount)).fetchall()
+    if len(rows) == 1 and rows[0]["n"] >= HABIT_MIN:
+        return rows[0]["category_id"], rows[0]["n"]
+    return None
+
+
 def _tokens(desc: str) -> set[str]:
     """Words of a merchant name, plus 3-letter pieces so spelling variants still share evidence."""
     key = merchant_key(desc)
@@ -139,8 +155,13 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
             refund_by = (date.fromisoformat(t["txn_date"])
                          + timedelta(days=rule["expects_refund_days"])).isoformat()
     else:
-        similar = _similar_past(conn, t["description"])
-        if similar:
+        habit = _habit(conn, t["description_norm"], t["amount"])
+        similar = None if habit else _similar_past(conn, t["description"])
+        if habit:
+            category_id, n = habit
+            status, confidence = "approved", 0.97
+            basis = f"approved by itself: you put this merchant in the same category {n} times"
+        elif similar:
             score, n, category_id = similar
             confidence = round(score * 0.9, 2)
             basis = f"similar to {n} earlier approved payment(s)"
