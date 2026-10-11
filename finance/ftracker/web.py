@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, starter, summary, watchfolder, uploads, views, views_home, views_overview, views_setup, views_trends
+from . import appmode, balances, categorize, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_overview, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -56,6 +56,7 @@ class App:
             self.pin, self.lan = phone_pin, True
         self.port = port
         self._fails: dict[str, tuple[int, float]] = {}
+        self._push_timer: threading.Timer | None = None
         self.csrf = secrets.token_urlsafe(24)
         self._secret = secrets.token_bytes(32)
         self.app_dir = app_dir or appmode.app_dir()
@@ -134,7 +135,10 @@ class App:
                 ts = appmode.tailscale_address()
                 ctx.phone_anywhere = f"http://{ts}:{self.port}/" if ts else ""
             if method == "POST":
-                return self._post(conn, ctx, path, headers, body)
+                res = self._post(conn, ctx, path, headers, body)
+                if res.status in (200, 303) and not path.startswith("/phone/cloud"):
+                    self._schedule_push()
+                return res
             if path in ("/", "/balances", "/wealth") and not self.fixed_today:
                 try:
                     fx.ensure_fresh(conn, self._today())      # at most every few hours; offline is fine
@@ -156,6 +160,27 @@ class App:
         finally:
             conn.close()
             self.active -= 1
+
+    def _schedule_push(self) -> None:
+        """After you change something, refresh the phone page a little later (one send for a burst of changes)."""
+        if self.fixed_today:
+            return
+        if self._push_timer:
+            self._push_timer.cancel()
+        self._push_timer = threading.Timer(20.0, self.push_phone_now)
+        self._push_timer.daemon = True
+        self._push_timer.start()
+
+    def push_phone_now(self) -> None:
+        try:
+            c = connect(self.home.db_path)
+            try:
+                phone_cloud.maybe_push(c, self._today())
+            finally:
+                c.close()
+        except Exception:
+            import traceback
+            print(traceback.format_exc())
 
     def _login_page(self, msg: str = "") -> str:
         return (f"<!doctype html><meta charset=utf-8><title>Finance</title><body style='font:16px system-ui;max-width:320px;margin:60px auto'>"
@@ -350,6 +375,7 @@ class App:
                 firstrun.dismiss_notice(conn)
                 return self._redirect("/", "")
             if path == "/quit":
+                self.push_phone_now()                     # leave the phone page up to date before closing
                 if self.shutdown:
                     threading.Timer(0.5, self.shutdown).start()
                 return _html(200, "<!doctype html><meta charset=utf-8><title>Closed</title><body style='font:16px system-ui;max-width:420px;margin:80px auto'>"
@@ -412,6 +438,19 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/phone/cloud/on":
+                phone_cloud.turn_on(conn)
+                res = sheetsync.push(conn, self._today()) if sheetsync.status(conn)["linked"] else {"ok": False, "detail": "The Google Sheet is not linked yet."}
+                return self._redirect("/setup", ("Phone page is on and the first numbers were sent." if res["ok"] else "Turned on, but sending failed: " + res["detail"]), err=not res["ok"])
+            if path == "/phone/cloud/send":
+                res = sheetsync.push(conn, self._today())
+                if res["ok"]:
+                    sheetsync._set_setting(conn, "cloud_hash", phone_cloud._digest(phone_cloud.payload_extras(conn, self._today())))
+                    conn.commit()
+                return self._redirect("/setup", "Sent to your phone page." if res["ok"] else "Not sent: " + res["detail"], err=not res["ok"])
+            if path == "/phone/cloud/off":
+                phone_cloud.turn_off(conn)
+                return self._redirect("/setup", "The phone page is turned off. It still holds the last numbers until you delete the Sheet's hidden _phone tab.")
             if path == "/phone/on":
                 pin = f"{secrets.randbelow(10 ** 6):06d}"
                 conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('phone_access', '1')")
@@ -593,6 +632,7 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
             while True:
                 time.sleep(5)
                 if watchdog.should_stop(time.time(), app.active):
+                    app.push_phone_now()
                     httpd.shutdown()
                     return
         threading.Thread(target=watch, daemon=True).start()

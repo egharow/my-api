@@ -213,7 +213,24 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                  'The phone can look but never change anything.</p>'
                  + _form(ctx, "/phone/on", '<button>Turn on phone access</button>', "inline")
                  + '<p class="muted">Windows may ask whether to allow Python on the network the first time. Choose <b>Private networks</b> and Allow.</p>' + anywhere)
-    out.append('<section class="card" style="margin-top:12px"><h2>Open on a phone</h2>' + phone + "</section>")
+    from . import phone_cloud, sheetsync
+    st = sheetsync.status(conn)
+    cp = phone_cloud.pin(conn)
+    if not st["linked"]:
+        cloud = ('<p class="muted">Needs your Google Sheet linked once (3 minutes). The steps are at the bottom of the <a href="/upload">Upload</a> page. '
+                 'Come back here after that.</p>')
+    elif not cp:
+        cloud = ('<p class="muted">Your phone gets a page with your Overview and Wealth, protected by a PIN. The latest numbers are kept in your Google account, '
+                 'so it works with this computer switched off.</p>' + _form(ctx, "/phone/cloud/on", '<button>Turn on the phone page</button>', "inline"))
+    else:
+        cloud = (f'<p>On your phone, open: <b style="word-break:break-all">{esc(sheetsync._get_setting(conn, "sheet_url") or "")}</b></p>'
+                 f'<p>PIN: <b style="font-size:20px">{esc(cp)}</b></p>'
+                 f'<p class="muted">Last sent: {esc((st["last_sync"] or "never").replace("T", " "))}. It refreshes by itself a little after you change something, and when you close the app. '
+                 'Tip: in the phone browser, choose “Add to Home screen”.</p>'
+                 + _form(ctx, "/phone/cloud/send", '<button>Send the latest numbers now</button>', "inline") + " "
+                 + _form(ctx, "/phone/cloud/off", '<button class="quiet">Turn off</button>', "inline"))
+    out.append('<section class="card" style="margin-top:12px"><h2>Open on your phone, anywhere</h2>' + cloud + "</section>")
+    out.append('<section class="card" style="margin-top:12px"><h2>Open on a phone while this computer is on</h2>' + phone + "</section>")
     folder = watchfolder.get(conn)
     out.append('<section class="card" style="margin-top:12px"><h2>Statements from a folder (Google Drive)</h2>'
                '<p class="muted">Install Google Drive for desktop, save your statements into one Drive folder (from your phone too), '

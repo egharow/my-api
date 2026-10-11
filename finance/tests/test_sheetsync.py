@@ -179,3 +179,29 @@ def test_sheet_page_guides_the_setup_and_validates_the_address(home, conn, monke
     monkeypatch.setattr(urllib.request, "urlopen", FakeGoogle(raw="<html>"))
     assert "Not updated" in _flash(_post(app, "/sheet/sync", {}))
     assert "did not update" in app.handle("GET", "/", H).body.decode()
+
+
+def test_phone_page_script_is_complete_and_the_snapshot_travels_with_the_pin(conn):
+    import json as _json
+    from ftracker import phone_cloud, sheetsync
+    script = sheetsync.script_text(conn)
+    assert "__TOKEN__" not in script and "__PAGE__" not in script
+    assert "function getSnapshot" in script and "getSnapshot(pin)" in script and "Wrong PIN" in script
+    sheetsync.link(conn, "https://script.google.com/macros/s/AKfycbx/exec")
+    sent = []
+
+    class Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def read(self): return b'{"ok": true, "sheets": 3, "snapshot": true}'
+    opener = lambda req, timeout=0: (sent.append(_json.loads(req.data.decode())), Resp())[1]
+    assert phone_cloud.maybe_push(conn, "2026-10-05", opener) is False          # off until you turn it on
+    pin = phone_cloud.turn_on(conn)
+    assert len(pin) == 8 and pin.isdigit()
+    assert phone_cloud.maybe_push(conn, "2026-10-05", opener) is True
+    body = sent[0]
+    assert body["snapshot"]["months"] is not None and body["pin_hash"] == phone_cloud.pin_hash(conn, pin)
+    assert pin not in _json.dumps(body)                                           # the PIN itself is never sent
+    assert phone_cloud.maybe_push(conn, "2026-10-05", opener) is False          # nothing changed: not sent again
+    phone_cloud.turn_off(conn)
+    assert phone_cloud.pin(conn) is None

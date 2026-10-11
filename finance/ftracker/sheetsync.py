@@ -37,7 +37,8 @@ def token(conn: sqlite3.Connection, reset: bool = False) -> str:
 
 def script_text(conn: sqlite3.Connection, reset: bool = False) -> str:
     template = resources.files("ftracker").joinpath("sheet_sync", "Code.gs").read_text(encoding="utf-8")
-    return template.replace("__TOKEN__", token(conn, reset))
+    page = resources.files("ftracker").joinpath("sheet_sync", "phone.html").read_text(encoding="utf-8")
+    return template.replace("__PAGE__", json.dumps(page)).replace("__TOKEN__", token(conn, reset))
 
 
 def valid_url(url: str) -> bool:
@@ -71,8 +72,10 @@ def status(conn: sqlite3.Connection) -> dict:
 
 
 def build_payload(conn: sqlite3.Connection, today: str) -> dict:
+    from . import phone_cloud
     tables = export.collect_tables(conn, today, _get_setting(conn, "sheet_notes", "0") == "1")
-    return {"token": token(conn), "sheets": [{"name": n, "header": h, "rows": r} for n, h, r in tables]}
+    return {"token": token(conn), "sheets": [{"name": n, "header": h, "rows": r} for n, h, r in tables],
+            **phone_cloud.payload_extras(conn, today)}
 
 
 def push(conn: sqlite3.Connection, today: str, opener=None) -> dict:

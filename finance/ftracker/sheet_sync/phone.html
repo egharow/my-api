@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Finance</title>
+<style>
+:root{--page:#f9f9f7;--surface:#fcfcfb;--ink:#0b0b0b;--ink2:#52514e;--muted:#6b6a65;--grid:#e1e0d9;--axis:#c3c2b7;--border:rgba(11,11,11,.10);--s1:#2a78d6;--s2:#eb6834;--good:#006300;--bad:#b5461c;--accent:#2a78d6}
+@media (prefers-color-scheme:dark){:root{--page:#0d0d0d;--surface:#1a1a19;--ink:#fff;--ink2:#c3c2b7;--muted:#a3a198;--grid:#2c2c2a;--axis:#383835;--border:rgba(255,255,255,.10);--s1:#3987e5;--s2:#d95926;--good:#3fbf3f;--bad:#f0916b;--accent:#3987e5}}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.w{max-width:720px;margin:0 auto;padding:12px 14px 40px}
+.tabs{display:flex;gap:4px;margin:4px 0 12px}.tabs button{flex:1}
+button,input{font:inherit;color:var(--ink)}button{background:var(--surface);border:1px solid var(--axis);border-radius:8px;padding:7px 12px;cursor:pointer}
+button.on{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}.sp{flex:1}
+.nav{display:flex;align-items:center;gap:10px;margin:8px 0}.nav b{font-size:18px;flex:1;text-align:center}.nav button{width:38px;height:38px;font-size:18px;padding:0}
+.trio{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+.t{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 10px}.t small{display:block;color:var(--ink2);font-size:12px}.t b{font-size:19px}.t i{display:block;font-style:normal;color:var(--muted);font-size:11px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:6px 12px;margin:10px 0}
+.c{display:grid;grid-template-columns:1fr 70px 78px;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--grid);font-size:14px}.c:last-child{border:0}
+.c .n,.n{text-align:right;font-variant-numeric:tabular-nums}.bar{height:5px;background:var(--grid);border-radius:3px;margin-top:3px}.bar span{display:block;height:5px;background:var(--s2);border-radius:3px}
+.up{color:var(--bad);font-weight:600}.dn{color:var(--good);font-weight:600}.cap{color:var(--muted);font-size:12px}
+h3{font-size:15px;margin:16px 0 4px}svg{width:100%;height:auto}svg text{fill:var(--muted);font-size:11px}svg .g{stroke:var(--grid)}
+#login{max-width:320px;margin:70px auto;text-align:center}#login input{width:100%;padding:10px;border:1px solid var(--axis);border-radius:8px;background:var(--surface);font-size:20px;text-align:center;letter-spacing:4px}
+#login button{margin-top:10px;width:100%;background:var(--accent);color:#fff;border:0;padding:10px}
+.err{color:var(--bad);margin-top:8px}
+</style></head><body>
+<div id="login"><h2>Finance</h2><p class="cap">Type the PIN from the app's Settings.</p>
+<input id="pin" type="password" inputmode="numeric" autocomplete="off" aria-label="PIN"><button id="go">Open</button><div class="err" id="err"></div></div>
+<div class="w" id="app" style="display:none"></div>
+<script>
+var D=null,view='ov',mode='month',mi=0,end=0,fmtN=function(v){return Math.round(v).toLocaleString('en-US')};
+var M=function(v){return (v<0?'-':'')+'₪'+fmtN(Math.abs(v))};
+var MON=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function lab(m){return MON[+m.slice(5,7)-1]+' '+m.slice(0,4)}function sh(m){return MON[+m.slice(5,7)-1].slice(0,3)+' '+m.slice(2,4)}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function el(id){return document.getElementById(id)}
+function pinTry(pin){
+  el('err').textContent='';
+  var ok=function(txt){try{D=JSON.parse(txt)}catch(e){el('err').textContent='Could not read the data.';return}
+    try{localStorage.setItem('fin_pin',pin)}catch(e){} el('login').style.display='none';el('app').style.display='block';
+    var ms=D.months;mi=ms.length-1;for(var i=ms.length-1;i>=0;i--){if(ms[i].m<D.generated.slice(0,7)){mi=i;break}}end=mi;draw()};
+  var bad=function(e){try{localStorage.removeItem('fin_pin')}catch(x){} el('err').textContent=(e&&e.message)||'Wrong PIN.'};
+  if(window.google&&google.script&&google.script.run){google.script.run.withSuccessHandler(ok).withFailureHandler(bad).getSnapshot(pin)}else{bad({message:'Not connected.'})}
+}
+el('go').onclick=function(){pinTry(el('pin').value)};el('pin').onkeydown=function(e){if(e.key==='Enter')pinTry(el('pin').value)};
+try{var p=localStorage.getItem('fin_pin');if(p)pinTry(p)}catch(e){}
+function usual(i){var prev=[];for(var k=i-1;k>=0&&prev.length<6;k--){if(D.months[k].exp>0)prev.push(D.months[k])}
+  if(!prev.length)return null;var u={};prev.forEach(function(m){for(var c in m.cats){u[c]=(u[c]||0)+m.cats[c]/prev.length}});return {cats:u,n:prev.length,total:prev.reduce(function(a,m){return a+m.exp},0)/prev.length}}
+function vs(v,u){if(u===undefined||u===null)return '<span class="cap">-</span>';var d=v-u;if(Math.abs(d)<Math.max(150,u*0.1))return '<span class="cap">≈ usual</span>';
+  return '<span class="'+(d>0?'up':'dn')+'">'+(d>0?'▲ ':'▼ ')+M(Math.abs(d))+'</span>'}
+function trio(inc,exp,inv,pre){var kept=inc-exp;return '<div class="trio"><div class="t"><small>'+pre+'Income</small><b>'+M(inc)+'</b></div><div class="t"><small>'+pre+'Expenses</small><b>'+M(exp)+'</b></div><div class="t"><small>'+pre+'Kept</small><b>'+M(kept)+'</b>'+(inv?'<i>'+M(inv)+' invested</i>':'')+'</div></div>'}
+function draw(){
+  var h='<div class="tabs"><button class="'+(view==='ov'?'on':'')+'" onclick="view=\'ov\';draw()">Overview</button><button class="'+(view==='w'?'on':'')+'" onclick="view=\'w\';draw()">Wealth</button></div>';
+  h+= view==='ov'?overview():wealth();
+  var age=(Date.now()-Date.parse(D.generated))/864e5;
+  h+='<p class="cap" style="text-align:center;margin-top:18px">Updated '+esc(D.generated.slice(0,10))+' '+esc(D.generated.slice(11,16))+(age>3?' · may be out of date; open the app on the computer to refresh':'')+'</p>';
+  el('app').innerHTML=h}
+function overview(){
+  var ms=D.months,h='<div class="row"><button class="'+(mode==='month'?'on':'')+'" onclick="mode=\'month\';draw()">Month</button><button class="'+(mode==='6'?'on':'')+'" onclick="mode=\'6\';draw()">6 months</button><button class="'+(mode==='12'?'on':'')+'" onclick="mode=\'12\';draw()">12 months</button></div>';
+  if(!ms.length)return h+'<p>No data yet.</p>';
+  if(mode==='month'){var m=ms[mi],u=usual(mi);
+    h+='<div class="nav"><button onclick="if(mi>0){mi--;draw()}" aria-label="Previous month">‹</button><b>'+lab(m.m)+'</b><button onclick="if(mi<D.months.length-1){mi++;draw()}" aria-label="Next month">›</button></div>';
+    h+=trio(m.inc,m.exp,m.inv,'');
+    var cs=Object.keys(m.cats).sort(function(a,b){return m.cats[b]-m.cats[a]}),top=cs.length?m.cats[cs[0]]:1;
+    h+='<h3>Where it went</h3><div class="card">';
+    cs.forEach(function(c){var v=m.cats[c];h+='<div class="c"><div dir="auto">'+esc(c)+'<div class="bar"><span style="width:'+Math.round(v/top*100)+'%"></span></div></div><div class="n">'+M(v)+'</div><div class="n">'+vs(v,u?(u.cats[c]||0):null)+'</div></div>'});
+    h+='<div class="c"><div><b>Total</b></div><div class="n"><b>'+M(m.exp)+'</b></div><div class="n">'+vs(m.exp,u?u.total:null)+'</div></div></div>';
+    var ss=Object.keys(m.src||{});if(ss.length){h+='<h3>Where the income came from</h3><div class="card">';ss.sort(function(a,b){return m.src[b]-m.src[a]}).forEach(function(s){h+='<div class="c" style="grid-template-columns:1fr 90px"><div dir="auto">'+esc(s)+'</div><div class="n">'+M(m.src[s])+'</div></div>'});h+='</div>'}
+  }else{var n=+mode,win=ms.slice(0,end+1).filter(function(m){return m.inc>0||m.exp>0}).slice(-n);
+    h+='<div class="nav"><button onclick="if(end>0){end--;draw()}">‹</button><b>last '+n+' months with data</b><button onclick="if(end<D.months.length-1){end++;draw()}">›</button></div>';
+    if(!win.length)return h+'<p>No data.</p>';var k=win.length,sum=function(f){return win.reduce(function(a,m){return a+f(m)},0)};
+    h+=trio(sum(function(m){return m.inc})/k,sum(function(m){return m.exp})/k,sum(function(m){return m.inv})/k,'Avg ');
+    h+='<p class="cap">Based on '+k+' month(s): '+win.map(function(m){return sh(m.m)}).join(', ')+'</p>'+chart(win);
+    var tot={},hi={};win.forEach(function(m){for(var c in m.cats){tot[c]=(tot[c]||0)+m.cats[c];if(!hi[c]||m.cats[c]>hi[c][1])hi[c]=[m.m,m.cats[c]]}});
+    var cs=Object.keys(tot).sort(function(a,b){return tot[b]-tot[a]}),top=cs.length?tot[cs[0]]/k:1;
+    h+='<h3>Average per category</h3><div class="card">';
+    cs.forEach(function(c){h+='<div class="c" style="grid-template-columns:1fr 78px 92px"><div dir="auto">'+esc(c)+'<div class="bar"><span style="width:'+Math.round(tot[c]/k/top*100)+'%"></span></div></div><div class="n"><b>'+M(tot[c]/k)+'</b></div><div class="n cap">'+sh(hi[c][0])+' '+M(hi[c][1])+'</div></div>'});
+    h+='</div>'}
+  return h}
+function chart(win){var W=600,H=170,L=44,B=22,T=8,mx=0;win.forEach(function(m){mx=Math.max(mx,m.inc,m.exp)});if(!mx)mx=1;var gw=(W-L-6)/win.length,bw=Math.min(16,gw/3),s='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Income and expenses by month">';
+  [0,.5,1].forEach(function(f){var y=T+(H-T-B)*(1-f);s+='<line class="g" x1="'+L+'" x2="'+(W-6)+'" y1="'+y+'" y2="'+y+'"/><text x="'+(L-4)+'" y="'+(y+4)+'" text-anchor="end">'+Math.round(mx*f/1000)+'k</text>'});
+  win.forEach(function(m,i){var gx=L+gw*i+gw/2;[[m.inc,'var(--s1)',-bw-1],[m.exp,'var(--s2)',1]].forEach(function(b){var hh=(H-T-B)*b[0]/mx;s+='<rect x="'+(gx+b[2])+'" y="'+(H-B-hh)+'" width="'+bw+'" height="'+hh+'" rx="3" fill="'+b[1]+'"/>'});
+    s+='<text x="'+gx+'" y="'+(H-6)+'" text-anchor="middle">'+sh(m.m).slice(0,3)+'</text>'});
+  return '<div class="card" style="padding:8px">'+s+'</svg><div class="cap"><span style="color:var(--s1)">■</span> Income &nbsp; <span style="color:var(--s2)">■</span> Expenses</div></div>'}
+function wealth(){var N=D.networth;if(!N||!N.series.length)return '<p>No balances yet.</p>';var s=N.series,last=s[s.length-1],prev=s.length>1?s[s.length-2]:null;
+  var h='<div class="trio" style="grid-template-columns:1fr 1fr"><div class="t"><small>Net worth</small><b>'+M(last.total)+'</b><i>as of '+esc(last.d)+'</i></div><div class="t"><small>Change</small><b>'+(prev?M(last.total-prev.total):'-')+'</b>'+(prev?'<i>since '+esc(prev.d)+'</i>':'')+'</div></div>';
+  var W=600,H=170,L=50,B=22,T=10,mx=Math.max.apply(null,s.map(function(p){return p.total}))||1,x=function(i){return L+(W-L-12)*(s.length>1?i/(s.length-1):.5)},y=function(v){return T+(H-T-B)*(1-v/mx)};
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Net worth over time">';[0,.5,1].forEach(function(f){svg+='<line class="g" x1="'+L+'" x2="'+(W-12)+'" y1="'+y(mx*f)+'" y2="'+y(mx*f)+'"/><text x="'+(L-4)+'" y="'+(y(mx*f)+4)+'" text-anchor="end">'+(mx*f/1e6).toFixed(1)+'M</text>'});
+  svg+='<polyline fill="none" stroke="var(--s1)" stroke-width="2" points="'+s.map(function(p,i){return x(i)+','+y(p.total)}).join(' ')+'"/>';
+  s.forEach(function(p,i){svg+='<circle cx="'+x(i)+'" cy="'+y(p.total)+'" r="4" fill="var(--s1)"/>'});
+  [0,s.length-1].forEach(function(i){svg+='<text x="'+x(i)+'" y="'+(H-6)+'" text-anchor="'+(i===0?'start':'end')+'">'+esc(s[i].d.slice(0,7))+'</text>'});
+  h+='<div class="card" style="padding:8px">'+svg+'</svg></div><h3>What it is made of</h3>';
+  var g={};N.lines.forEach(function(l){(g[l.kind]=g[l.kind]||[]).push(l)});var names={bank:'Bank accounts',savings:'Savings',investment:'Investments',pension:'Pension',real_estate:'Real estate',loan:'Loans',other:'Other'};
+  Object.keys(g).forEach(function(k){var sub=g[k].reduce(function(a,l){return a+l.value},0);h+='<details class="card"><summary style="padding:8px 0;cursor:pointer"><b>'+esc(names[k]||k)+'</b> <span style="float:right">'+M(sub)+'</span></summary>';
+    g[k].sort(function(a,b){return Math.abs(b.value)-Math.abs(a.value)}).forEach(function(l){h+='<div class="c" style="grid-template-columns:1fr 100px"><div dir="auto">'+esc(l.label)+'</div><div class="n">'+M(l.value)+'</div></div>'});h+='</details>'});
+  return h}
+</script></body></html>

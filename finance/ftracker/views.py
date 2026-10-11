@@ -567,7 +567,8 @@ def sheet_body(conn: sqlite3.Connection, ctx: Ctx, back: str = "/sheet") -> str:
                "(navigator.clipboard?navigator.clipboard.writeText(t.value):Promise.reject()).then(function(){this.textContent='Copied ✔'}.bind(this))"
                ".catch(function(){document.execCommand('copy')});")
     steps = ('<div class="card" style="margin-top:12px"><h2>Link it (3 minutes, once)</h2>'
-             "<p class=muted>Google only lets a sheet's owner approve a script that writes to it, so this one step has to be yours.</p><ol>"
+             "<p class=muted>Google only lets a sheet's owner approve a script that writes to it, so this one step has to be yours. The same script also serves the phone page (turn it on under Settings, Open on your phone). "
+             "If you linked the Sheet earlier, paste the script again, then choose <b>Deploy › Manage deployments</b>, the pencil, <b>New version</b>, <b>Deploy</b>.</p><ol>"
              f"<li>Open {doc}, then choose <b>Extensions › Apps Script</b>.</li>"
              f'<li><button onclick="{copy_js}">Copy the script</button> then delete what is in the editor, paste, and click <b>Save</b>.</li>'
              "<li><b>Deploy › New deployment</b>, type <b>Web app</b>. Execute as: <b>Me</b>. Who has access: <b>Anyone</b>. "
