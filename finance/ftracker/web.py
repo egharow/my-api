@@ -526,13 +526,15 @@ class App:
                 closing.set_closed(conn, m, form.get("reopen") != "1")
                 return self._redirect("/" if form.get("reopen") != "1" else f"/close?m={m}",
                                       f"{m} is closed" if form.get("reopen") != "1" else f"{m} is open again")
-            if path == "/setting/oneoff":
+            if path == "/line/leaveout":
+                back = form.get("back", "/")
+                if not back.startswith("/") or back.startswith("//") or "\n" in back or "://" in back:
+                    back = "/"
                 try:
-                    amount = 0.0 if form.get("off") else float((form.get("amount") or "0").replace(",", ""))
-                except ValueError:
-                    return self._redirect("/", "Type the amount as a number.", err=True)
-                summary.set_oneoff_limit(conn, amount)
-                return self._redirect("/", f"Payments above ₪{amount:,.0f} are now left out" if amount > 0 else "Everything is counted again")
+                    summary.set_left_out(conn, int(form["id"]), form.get("on") == "1")
+                except (ValueError, KeyError):
+                    return self._redirect(back, "Pick a payment.", err=True)
+                return self._redirect(back, "Left out of the totals" if form.get("on") == "1" else "Counted again")
             if path == "/fx/refresh":
                 res = fx.refresh_current(conn, self._today(), force=True)
                 if res["status"] == "failed":

@@ -368,20 +368,20 @@ def test_balances_page_has_a_draggable_fold_line_and_saves_the_order(app, conn):
     assert [r["account_id"] for r in bal.latest(conn, "2026-10-05")] == list(reversed(ids))
 
 
-def test_one_off_limit_leaves_big_payments_out_everywhere_and_can_be_switched_off(app, conn):
+def test_chosen_payments_can_be_left_out_of_the_totals_and_counted_again(app, conn):
     from ftracker import summary
     before = summary.month_overview(conn, "2026-10")["spending"]
-    assert summary.oneoff_left_out(conn, ["2026-10"]) == []
-    res = post(app, "/setting/oneoff", {"amount": "3,000"})
-    assert res.status == 303 and summary.oneoff_limit(conn) == 3000.0
+    line = conn.execute("SELECT id FROM transactions WHERE description = 'ONE OFF SERVICE'").fetchone()[0]
+    res = post(app, "/line/leaveout", {"id": str(line), "on": "1", "back": "/?p=month&m=2026-10"})
+    assert res.status == 303
     left = summary.oneoff_left_out(conn, ["2026-10"])
-    assert any(o["spent"] == 3500.0 for o in left)
-    after = summary.month_overview(conn, "2026-10")["spending"]
-    assert after == round(before - sum(o["spent"] for o in left), 2)
-    assert "left out" in text(get(app, "/?p=month&m=2026-10"))
-    post(app, "/setting/oneoff", {"off": "1"})
-    assert summary.oneoff_limit(conn) == 0.0 and summary.month_overview(conn, "2026-10")["spending"] == before
-    assert post(app, "/setting/oneoff", {"amount": "abc"}).status == 303
+    assert [o["spent"] for o in left] == [3500.0]
+    assert summary.month_overview(conn, "2026-10")["spending"] == round(before - 3500.0, 2)
+    page = text(get(app, "/?p=month&m=2026-10"))
+    assert "Left out of the numbers" in page and "Count it again" in page
+    post(app, "/line/leaveout", {"id": str(line), "on": "0"})
+    assert summary.oneoff_left_out(conn, ["2026-10"]) == [] and summary.month_overview(conn, "2026-10")["spending"] == before
+    assert post(app, "/line/leaveout", {"id": "x", "on": "1"}).status == 303
 
 
 def test_close_the_month_checks_then_marks_it_and_can_reopen(app, conn):

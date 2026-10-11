@@ -33,44 +33,29 @@ def set_include_reimbursed(conn: sqlite3.Connection, on: bool) -> None:
     conn.commit()
 
 
-def oneoff_limit(conn: sqlite3.Connection) -> float:
-    """Single payments above this amount are left out of spending (0 = nothing is left out)."""
-    row = conn.execute("SELECT value FROM settings WHERE key = 'oneoff_limit'").fetchone()
-    try:
-        return max(0.0, float(row[0])) if row else 0.0
-    except ValueError:
-        return 0.0
+def apply_oneoff(conn: sqlite3.Connection, where: list, args: list) -> None:
+    """Leaves out the payments you marked as one-offs (a query on transactions t)."""
+    where.append("t.left_out = 0")
 
 
-def set_oneoff_limit(conn: sqlite3.Connection, amount: float) -> None:
-    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('oneoff_limit', ?)", (str(max(0.0, amount)),))
+def set_left_out(conn: sqlite3.Connection, line_id: int, on: bool) -> None:
+    conn.execute("UPDATE transactions SET left_out = ? WHERE id = ?", (1 if on else 0, line_id))
     conn.commit()
 
 
-def apply_oneoff(conn: sqlite3.Connection, where: list, args: list) -> None:
-    """Adds the 'leave out big one-off payments' filter to a query on transactions t."""
-    lim = oneoff_limit(conn)
-    if lim > 0:
-        where.append("-t.amount <= ?")
-        args.append(lim)
-
-
 def oneoff_left_out(conn: sqlite3.Connection, months: list[str], owner: str | None = None) -> list[dict]:
-    """The payments the limit leaves out of these months (largest first)."""
-    lim = oneoff_limit(conn)
-    if lim <= 0 or not months:
+    """The payments you left out of these months, largest first."""
+    if not months:
         return []
-    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'", "-t.amount > ?",
+    where = ["t.left_out = 1", "t.amount < 0", "t.kind != 'card_payment'", "t.currency = 'ILS'",
              f"t.budget_month IN ({','.join('?' * len(months))})"]
-    args: list = [lim, *months]
-    if not include_reimbursed(conn):
-        where.append("c.reimbursed = 0")
+    args: list = [*months]
     if owner:
         where.append("o.name = ?")
         args.append(owner)
     return [dict(r) for r in conn.execute(
-        f"""SELECT t.id, t.txn_date, t.description, -t.amount AS spent, COALESCE(p.name, c.name) AS category
-            FROM transactions t JOIN categories c ON c.id = t.category_id LEFT JOIN categories p ON p.id = c.parent_id
+        f"""SELECT t.id, t.txn_date, t.description, -t.amount AS spent, c.name AS category
+            FROM transactions t JOIN categories c ON c.id = t.category_id
             JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
             WHERE {' AND '.join(where)} ORDER BY spent DESC""", args)]
 

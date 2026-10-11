@@ -76,10 +76,13 @@ def _change_form(ctx: Ctx, line_id, cats: str, back: str) -> str:
         return ""
     if not line_id:
         return '<span class="cap">from your old sheet</span>'
-    return ('<details class="chg"><summary>change category</summary>'
+    return ('<details class="chg"><summary>change category / leave out</summary>'
             + _form(ctx, "/line/category", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="back" value="{esc(back)}">'
                     f'<select name="category" required><option value="" selected disabled>choose…</option>{cats}</select> '
                     '<label class="cap"><input type="checkbox" name="learn" value="1"> remember</label> <button class="quiet">Move</button>', "row")
+            + _form(ctx, "/line/leaveout", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="on" value="1">'
+                    f'<input type="hidden" name="back" value="{esc(back)}"><button class="quiet" title="A one-off, like a car or a trip. It stays in your records but not in the totals.">'
+                    'Leave out of the totals</button>', "row")
             + "</details>")
 
 
@@ -176,7 +179,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     controls = _controls(base, mode, owner, m, end, frm, to, owners, find)
     cats = _cat_options(conn)
     back = base + _qs(**{k: v for k, v in q.items() if k in ("p", "m", "end", "from", "to", "owner", "open")})
-    vit = _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) + _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner)
+    vit = _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) + _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner, back)
 
     if find:
         rows = summary.find_lines(conn, find)
@@ -210,23 +213,18 @@ def _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) -> str:
                     f'<button class="quiet">{"Leave out" if inc_r else "Include"}</button>', "row") + "</p>")
 
 
-def _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner) -> str:
-    lim = summary.oneoff_limit(conn)
+def _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner, back="/") -> str:
     win = [m] if mode == "month" else (months_between(frm, to) if mode == "custom" else [x for x in d["months"] if x <= end][-int(mode):])
     out = summary.oneoff_left_out(conn, win, owner)
-    if ctx.readonly:
-        return (f'<p class="cap">Payments above {money(lim)} are left out: {len(out)} here, {money(sum(o["spent"] for o in out))}.</p>' if lim else "")
-    if lim:
-        listing = ("<ul class='cap'>" + "".join(f'<li>{esc(dmy(o["txn_date"]))} · <bdi dir="auto">{esc(o["description"])}</bdi> · {esc(o["category"])} · {money(o["spent"])}</li>'
-                                               for o in out[:8]) + "</ul>") if out else ""
-        state = f'Single payments above <b>{money(lim)}</b> are left out ({len(out)} here, {money(sum(o["spent"] for o in out))}).'
-    else:
-        listing, state = "", "Big one-off payments (a car, a trip) are counted like everything else."
-    form = _form(ctx, "/setting/oneoff",
-                 f'<span>{state}</span> <label class="cap">Leave out payments above ₪ <input type="number" name="amount" min="0" step="100" value="{int(lim) if lim else ""}" '
-                 f'placeholder="e.g. 10000" style="width:110px"></label> <button class="quiet">Save</button>'
-                 + (' <button class="quiet" name="off" value="1">Count everything</button>' if lim else ""), "row")
-    return f'<div class="adjust cap">{form}{listing}</div>'
+    if not out:
+        return ""
+    def row(o):
+        undo = "" if ctx.readonly else _form(ctx, "/line/leaveout", f'<input type="hidden" name="id" value="{o["id"]}"><input type="hidden" name="on" value="0">'
+                                              f'<input type="hidden" name="back" value="{esc(back)}"><button class="quiet">Count it again</button>', "inline")
+        return (f'<div class="oddrow"><span>{esc(o["txn_date"][8:10])}/{esc(o["txn_date"][5:7])}</span><span><bdi dir="auto">{esc(o["description"])}</bdi>'
+                f'<span class="cap"> · {esc(o["category"])}</span></span><span class="n">{money(o["spent"], "ILS", 0)}</span><span>{undo}</span></div>')
+    return (f'<div class="adjust"><b>Left out of the numbers</b> <span class="cap">{len(out)} payment(s), {money(sum(o["spent"] for o in out))}. '
+            f'You chose these as one-offs.</span>{"".join(row(o) for o in out)}</div>')
 
 
 def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
