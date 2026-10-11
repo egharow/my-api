@@ -191,6 +191,60 @@ header{box-shadow:0 1px 0 var(--border)}
 button:not(.quiet){background:var(--accent);border-color:var(--accent)}
 nav a.on{background:color-mix(in srgb,var(--accent) 13%,transparent)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ledger: a printed statement. Square corners, rules instead of boxes, figures in a monospaced face, black buttons, one ink-blue for links. */
+:root{--page:#efefee;--surface:#ffffff;--ink:#111111;--ink2:#3c3c3e;--muted:#6b6b6e;--grid:#d9d9db;--axis:#b4b4b8;--border:#cfcfd2;--rule:#111111;--accent:#1f3a93;
+--good:#1b7a3d;--goodtext:#17652f;--critical:#b3261e;--tone-warn:#ffffff;--tone-good:#ffffff;--tone-bad:#ffffff;
+--num:ui-monospace,"SF Mono","Cascadia Mono",Consolas,"Liberation Mono",monospace}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--page:#121212;--surface:#1b1b1c;--ink:#ededed;--ink2:#c9c9cc;--muted:#9a9a9f;--grid:#2c2c2e;--axis:#444447;--border:#38383b;--rule:#ededed;--accent:#8fa8ff;
+--good:#4cc27a;--goodtext:#4cc27a;--critical:#ff7a70;--tone-warn:#1b1b1c;--tone-good:#1b1b1c;--tone-bad:#1b1b1c}}
+:root[data-theme="dark"]{--page:#121212;--surface:#1b1b1c;--ink:#ededed;--ink2:#c9c9cc;--muted:#9a9a9f;--grid:#2c2c2e;--axis:#444447;--border:#38383b;--rule:#ededed;--accent:#8fa8ff;
+--good:#4cc27a;--goodtext:#4cc27a;--critical:#ff7a70;--tone-warn:#1b1b1c;--tone-good:#1b1b1c;--tone-bad:#1b1b1c}
+body{font-size:15px}
+.n,td.n,th.n,.hval,.tile .v,.trio b,.cat .n,.oddrow .n,.srcrow .n,.cat .lines .n{font-family:var(--num);font-variant-numeric:tabular-nums}
+header{background:var(--surface);backdrop-filter:none;box-shadow:none;border-bottom:2px solid var(--rule)}
+nav::before{content:"Finance";font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:13px;margin-right:22px;color:var(--ink)}
+nav a{border-radius:0;margin:0;padding:15px 12px 13px;border-bottom:3px solid transparent;font-weight:500;color:var(--ink2)}
+nav a.on{background:transparent;color:var(--ink);font-weight:700;border-bottom-color:var(--rule)}
+nav a:hover{background:transparent;color:var(--ink);border-bottom-color:var(--axis)}
+nav .badge{border-radius:2px;background:var(--ink);color:var(--surface);font-family:var(--num);font-size:11.5px;padding:0 5px}
+@media (max-width:640px){nav::before{display:none}}
+h1{font-size:30px;font-weight:800;letter-spacing:-.025em;margin:18px 0 14px}
+h2,h4{font-weight:700}
+h3{text-transform:uppercase;letter-spacing:.09em;font-size:12.5px!important;color:var(--ink2);border-top:2px solid var(--rule);padding-top:8px;margin-top:26px!important}
+.card,.cats,.tile,.adjust,.banner,.flash,.trio,.trio>div,.cat .lines{border-radius:2px}
+.card,.cats,.tile{background:var(--surface);border:1px solid var(--border);box-shadow:none}
+.card{padding:16px 18px}
+.trio{border:1px solid var(--border);border-top:2px solid var(--rule);background:var(--surface)}
+.trio>div{border-left:1px solid var(--grid)}
+.trio small{color:var(--muted);letter-spacing:.1em;font-size:11px}
+.trio>div:nth-child(n)>small:first-child::before{content:none}
+.trio b{font-size:30px;font-weight:600;letter-spacing:-.02em}.trio b.neg{color:var(--critical)}
+.cat.head{border-bottom:2px solid var(--rule);font-size:11px;letter-spacing:.09em}
+.cat>summary:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.cat.foot{border-top:2px solid var(--rule);margin-top:2px}
+.share .t,.share .t span,.htrack,.hbar,.pbar,.pfill{border-radius:0}.share .t span{background:var(--ink)}
+.cat .lines{background:transparent;border-left:2px solid var(--grid);border-radius:0}
+.banner,.flash{background:var(--surface);border:1px solid var(--border);box-shadow:none}
+.banner{border-top:2px solid var(--rule)}.flash.err{border-top:2px solid var(--critical);background:var(--surface)}
+.adjust{border:1px solid var(--border);border-top:2px solid var(--rule);background:var(--surface)}
+button,button:not(.quiet){border-radius:2px;background:var(--ink);border-color:var(--ink);color:var(--surface);font-weight:600;padding:6px 14px}
+button.quiet{background:transparent;color:var(--ink);border-color:var(--axis)}
+button.quiet:hover{border-color:var(--ink);background:transparent}
+input,select,textarea{border-radius:2px}
+input:focus,select:focus{box-shadow:none;outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+.seg{border-radius:2px;border-color:var(--ink)}.seg a.on{background:var(--ink);color:var(--surface)}
+.nb{border-radius:2px}
+.chip,.todo .chip{border-radius:2px;border:1px solid var(--axis);background:var(--surface);color:var(--ink)}
+.todo .chip b{background:transparent;color:var(--ink);padding:0;font-family:var(--num);font-size:14px;margin-right:6px;border-radius:0}
+.todo .chip:hover{border-color:var(--ink);background:var(--surface)}
+.chip.good{background:transparent;border-color:var(--good)}
+.chk .mark{border-radius:2px;background:transparent;color:var(--good);border:2px solid var(--good)}.chk.todo .mark{color:var(--ink);border-color:var(--ink);background:transparent}
+.btnlink{border-radius:2px;border-color:var(--ink);color:var(--ink)}.btnlink:hover{background:var(--ink);color:var(--surface)}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);border-bottom:2px solid var(--rule)}
+a{color:var(--accent)}
+.up{color:var(--critical)}.down{color:var(--goodtext)}
+.foot{letter-spacing:.06em;text-transform:uppercase;font-size:11px}
 @media print{header,.todo,button,.modes,#tip{display:none}body{background:#fff}}
 """
 
