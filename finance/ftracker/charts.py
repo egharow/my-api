@@ -222,3 +222,160 @@ def bar_chart(points: list[tuple[str, float]], currency: str, label: str, signed
                    f'<text x="{W - R}" y="{sy(avg) - 5:.1f}" text-anchor="end" class="axis">average {escape(compact(avg, currency))}</text>')
     out.append("</svg>")
     return "".join(out)
+
+
+OTHER = "Other"
+
+
+def _color(i: int, name: str) -> str:
+    return "--cx" if name == OTHER else f"--c{i % 6 + 1}"
+
+
+def _swatches(names: list[str]) -> str:
+    return _legend([(n, _color(i, n)) for i, n in enumerate(names)])
+
+
+def stacked_bars(months: list[str], series: list[tuple[str, list[float]]], currency: str, label: str) -> str:
+    """One column per month, split into parts that add up to the month's total. series: (name, value per month)."""
+    if not months or not series:
+        return '<p class="muted">No data yet.</p>'
+    W, H, L, R, T, B = 640, 260, 56, 12, 16, 30
+    totals = [sum(v[i] for _, v in series) for i in range(len(months))]
+    top, ticks = nice_axis(max(totals) or 1)
+    n = len(months)
+    gw = (W - L - R) / n
+    bw = max(8.0, min(40.0, gw * 0.62))
+    base = H - B
+
+    def sy(v):
+        return T + (H - T - B) * (1 - v / top)
+
+    out = [_swatches([nme for nme, _ in series]), f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
+    for t in ticks:
+        y = sy(t)
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>'
+                   f'<text x="{L - 8}" y="{y + 4:.1f}" text-anchor="end" class="axis">{escape(compact(t, currency))}</text>')
+    step = max(1, math.ceil(n / 8))
+    for i, m in enumerate(months):
+        gx = L + gw * i + gw / 2
+        acc = 0.0
+        for k, (name, vals) in enumerate(series):
+            v = vals[i]
+            if v <= 0:
+                continue
+            y1, y0 = sy(acc + v), sy(acc)
+            out.append(f'<rect x="{gx - bw / 2:.1f}" y="{y1:.1f}" width="{bw:.1f}" height="{max(y0 - y1, 0.5):.1f}" fill="var({_color(k, name)})" '
+                       f'stroke="var(--surface)" stroke-width="1"/>')
+            acc += v
+        parts = ", ".join(f"{nme} {money(v[i], currency)}" for nme, v in series if v[i] > 0)
+        out.append(f'<rect x="{gx - gw / 2:.1f}" y="{T}" width="{gw:.1f}" height="{base - T}" fill="transparent" '
+                   f'data-tip="{escape(f"{m}: {money(totals[i], currency)} ({parts})")}"/>')
+        if i % step == 0:
+            out.append(f'<text x="{gx:.1f}" y="{H - 8}" text-anchor="middle" class="axis">{escape(m)}</text>')
+    out.append(f'<line x1="{L}" x2="{W - R}" y1="{base}" y2="{base}" class="baseline"/></svg>')
+    return "".join(out)
+
+
+def stacked_area(points: list[tuple[str, list[float]]], names: list[str], currency: str, label: str) -> str:
+    """Parts of a total over time. points: (iso date, value per name). Negative values (debts) stack below zero."""
+    if len(points) < 2:
+        return '<p class="muted">Needs at least two dates.</p>'
+    W, H, L, R, T, B = 640, 280, 56, 12, 16, 30
+    days = [date.fromisoformat(d).toordinal() for d, _ in points]
+    x0, x1 = days[0], days[-1]
+    maxpos = max(sum(max(v, 0) for v in vals) for _, vals in points) or 1.0
+    maxneg = max(sum(-min(v, 0) for v in vals) for _, vals in points)
+    top, ticks = nice_axis(maxpos)
+    step = ticks[1] - ticks[0]
+    floor = -math.ceil(maxneg / step) * step if maxneg else 0.0
+    ticks = [floor + i * step for i in range(int(round((top - floor) / step)) + 1)]
+
+    def sx(d):
+        return L + (W - L - R) * (d - x0) / ((x1 - x0) or 1)
+
+    def sy(v):
+        return T + (H - T - B) * (1 - (v - floor) / (top - floor))
+
+    out = [_swatches(names), f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
+    for t in ticks:
+        y = sy(t)
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>'
+                   f'<text x="{L - 8}" y="{y + 4:.1f}" text-anchor="end" class="axis">{escape(compact(t, currency))}</text>')
+    pos = [0.0] * len(points)
+    neg = [0.0] * len(points)
+    for k, name in enumerate(names):
+        lo, hi = [], []
+        for i, (_, vals) in enumerate(points):
+            v = vals[k]
+            if v >= 0:
+                lo.append(pos[i]); hi.append(pos[i] + v); pos[i] += v
+            else:
+                hi.append(neg[i]); lo.append(neg[i] + v); neg[i] += v
+        upper = " ".join(f"{sx(d):.1f},{sy(h):.1f}" for d, h in zip(days, hi))
+        lower = " ".join(f"{sx(d):.1f},{sy(l):.1f}" for d, l in reversed(list(zip(days, lo))))
+        out.append(f'<polygon points="{upper} {lower}" fill="var({_color(k, name)})" stroke="var(--surface)" stroke-width="1"/>')
+    out.append(f'<line x1="{L}" x2="{W - R}" y1="{sy(0):.1f}" y2="{sy(0):.1f}" class="baseline"/>')
+    for i, (iso, vals) in enumerate(points):
+        cx = sx(days[i])
+        w = max(((sx(days[i + 1]) - cx) if i + 1 < len(days) else (cx - sx(days[i - 1]))) , 6)
+        parts = ", ".join(f"{nme} {money(v, currency)}" for nme, v in zip(names, vals) if v)
+        out.append(f'<rect x="{cx - w / 2:.1f}" y="{T}" width="{w:.1f}" height="{H - T - B}" fill="transparent" '
+                   f'data-tip="{escape(f"{iso}: {money(sum(vals), currency)} ({parts})")}"/>')
+    xs = [sx(d) for d in days]
+    keep: list[int] = []
+    for i, cx in enumerate(xs):
+        if not keep or cx - xs[keep[-1]] >= 70:
+            keep.append(i)
+    if keep[-1] != len(xs) - 1:
+        if xs[-1] - xs[keep[-1]] >= 70:
+            keep.append(len(xs) - 1)
+        else:
+            keep[-1] = len(xs) - 1
+    for i in keep:
+        anchor = "end" if xs[i] > W - R - 30 else ("start" if xs[i] < L + 30 else "middle")
+        out.append(f'<text x="{xs[i]:.1f}" y="{H - 8}" text-anchor="{anchor}" class="axis">{escape(points[i][0][:7])}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+def pace_chart(this: list[float | None], usual: list[float], low: list[float], high: list[float], currency: str, label: str, month: str) -> str:
+    """Spending added up day by day (solid), against the usual month (dashed) and the range of earlier months (band)."""
+    n = len(usual)
+    if n < 2:
+        return ""
+    W, H, L, R, T, B = 640, 240, 56, 56, 16, 30
+    top, ticks = nice_axis(max([*high, *[v for v in this if v is not None]]) or 1)
+
+    def sx(day):                       # day 1..n
+        return L + (W - L - R) * (day - 1) / (n - 1)
+
+    def sy(v):
+        return T + (H - T - B) * (1 - v / top)
+
+    out = [_legend([("This month", "--s2"), ("Usual month", "--axis")]),
+           f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
+    for t in ticks:
+        y = sy(t)
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>'
+                   f'<text x="{L - 8}" y="{y + 4:.1f}" text-anchor="end" class="axis">{escape(compact(t, currency))}</text>')
+    up = " ".join(f"{sx(d + 1):.1f},{sy(v):.1f}" for d, v in enumerate(high))
+    dn = " ".join(f"{sx(d + 1):.1f},{sy(v):.1f}" for d, v in reversed(list(enumerate(low))))
+    out.append(f'<polygon points="{up} {dn}" fill="var(--grid)" opacity=".7"/>')
+    out.append('<polyline points="' + " ".join(f"{sx(d + 1):.1f},{sy(v):.1f}" for d, v in enumerate(usual))
+               + '" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 4"/>')
+    pts = [(d + 1, v) for d, v in enumerate(this) if v is not None]
+    if pts:
+        out.append('<polyline points="' + " ".join(f"{sx(d):.1f},{sy(v):.1f}" for d, v in pts)
+                   + '" fill="none" stroke="var(--s2)" stroke-width="2.5" stroke-linejoin="round"/>')
+        d, v = pts[-1]
+        out.append(f'<circle cx="{sx(d):.1f}" cy="{sy(v):.1f}" r="4.5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/>'
+                   f'<text x="{sx(d) + 8:.1f}" y="{sy(v) + 4:.1f}" class="direct">{escape(compact(v, currency))}</text>')
+    for d in range(n):
+        v = this[d] if d < len(this) else None
+        tip = f"{d + 1}/{month[5:7]}: " + (f"{money(v, currency)} so far, " if v is not None else "") + f"usual {money(usual[d], currency)}"
+        out.append(f'<rect x="{sx(d + 1) - (W - L - R) / (n - 1) / 2:.1f}" y="{T}" width="{(W - L - R) / (n - 1):.1f}" height="{H - T - B}" '
+                   f'fill="transparent" data-tip="{escape(tip)}"/>')
+    for d in range(1, n + 1, 5):
+        out.append(f'<text x="{sx(d):.1f}" y="{H - 8}" text-anchor="middle" class="axis">{d}</text>')
+    out.append(f'<line x1="{L}" x2="{W - R}" y1="{sy(0):.1f}" y2="{sy(0):.1f}" class="baseline"/></svg>')
+    return "".join(out)

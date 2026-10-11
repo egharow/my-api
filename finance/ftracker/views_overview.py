@@ -260,6 +260,45 @@ def _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner, back="/") -> str:
             f'You chose these as one-offs.</span>{"".join(row(o) for o in out)}</div>')
 
 
+def _pace(conn, ctx, d, m, owner) -> str:
+    """The month added up day by day against the usual month."""
+    import calendar
+    from statistics import median
+    y, mo = int(m[:4]), int(m[5:7])
+    n = calendar.monthrange(y, mo)[1]
+
+    def cum(month):
+        days = summary.daily_spending(conn, month, owner)
+        if not days:
+            return None
+        out, run = [], 0.0
+        for day in range(1, calendar.monthrange(int(month[:4]), int(month[5:7]))[1] + 1):
+            run += days.get(day, 0.0)
+            out.append(run)
+        return (out + [out[-1]] * 31)[:n]
+
+    prior = [x for x in d["months"] if x < m][-USUAL_MONTHS:]
+    earlier = [c for c in (cum(x) for x in prior) if c]
+    mine = cum(m)
+    if len(earlier) < 2 or not mine:
+        return ""
+    usual = [median(c[i] for c in earlier) for i in range(n)]
+    low = [min(c[i] for c in earlier) for i in range(n)]
+    high = [max(c[i] for c in earlier) for i in range(n)]
+    cutoff = n
+    if m == ctx.today[:7]:
+        cutoff = int(ctx.today[8:10])
+    elif m > ctx.today[:7]:
+        return ""
+    this = [mine[i] if i < cutoff else None for i in range(n)]
+    ahead = mine[cutoff - 1] - usual[cutoff - 1]
+    verdict = (f"{money(abs(ahead))} {'above' if ahead > 0 else 'below'} a usual month at this point" if abs(ahead) >= 1 else "right on a usual month")
+    return ('<div class="card" style="margin-top:14px"><h4 style="margin:0 0 4px">How the month unfolded</h4>'
+            f'<p class="cap" style="margin:0 0 8px">{verdict}. The grey band is the range of your last {len(earlier)} months. '
+            'It counts each payment on the day you made it, so it can differ from the totals above, which put card payments in the month they are billed.</p>'
+            + charts.pace_chart(this, usual, low, high, "ILS", "Spending added up through the month", m) + "</div>")
+
+
 def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
     spend = d["spend"].get(m, {})
     exp, inc, inv = d["exp_tot"].get(m, 0.0), d["inc_tot"].get(m, 0.0), d["inv"].get(m, 0.0)
@@ -294,7 +333,7 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
               if inc_rows else "")
     fixed = insights.fixed_costs(conn, m, d["months"], owner)
     odd = insights.unusual(conn, m, d["months"], owner, fixed)
-    return (f'{note}{_tiles(inc, exp, inv)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
+    return (f'{note}{_tiles(inc, exp, inv)}{_pace(conn, ctx, d, m, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
             f'<div class="cats">{head}{"".join(rows)}{foot}</div>{_worth_a_look(ctx, odd, cats, back)}{_fixed_card(fixed, m)}{income}')
 
 
@@ -320,6 +359,34 @@ def _fixed_card(fixed, m) -> str:
     return (f'<div class="card" style="margin-top:14px"><h4 style="margin:0 0 8px">Fixed costs <span class="cap">repeat every month at about the same amount</span></h4>{rows}</div>')
 
 
+def _period_stacks(conn, d, have, owner) -> str:
+    """Two charts under the income/expense bars: spending split by category, and by fixed or flexible."""
+    if len(have) < 2:
+        return ""
+    totals: dict[str, float] = {}
+    for x in have:
+        for c, v in d["spend"].get(x, {}).items():
+            totals[c] = totals.get(c, 0) + v
+    top = sorted(totals, key=lambda c: -totals[c])[:6]
+    series = [(c, [d["spend"].get(x, {}).get(c, 0.0) for x in have]) for c in top]
+    rest = [round(sum(v for c, v in d["spend"].get(x, {}).items() if c not in top), 2) for x in have]
+    if any(rest):
+        series.append((charts.OTHER, rest))
+    labels = [short_label(x) for x in have]
+    cat_html = charts.stacked_bars(labels, series, "ILS", "Spending by category, month by month")
+    fixed = []
+    for x in have:
+        f = insights.fixed_costs(conn, x, d["months"], owner)
+        fixed.append(min(round(sum(i["this"] or 0 for i in f), 2), d["exp_tot"].get(x, 0.0)))
+    flex = [round(max(d["exp_tot"].get(x, 0.0) - f, 0.0), 2) for x, f in zip(have, fixed)]
+    fix_html = charts.stacked_bars(labels, [("Fixed (mortgage, loans, regular bills)", fixed), ("Everything else", flex)], "ILS", "Fixed and flexible spending")
+    share = sum(flex) / (sum(flex) + sum(fixed) or 1) * 100
+    return (f'<h4 style="margin:18px 0 4px">Where it went, month by month</h4>{cat_html}'
+            + charts.data_table(["Month", *[n for n, _ in series]], [[labels[i], *[f"{v[i]:,.0f}" for _, v in series]] for i in range(len(have))], "Spending by category and month")
+            + f'<h4 style="margin:18px 0 4px">What you can actually change</h4><p class="cap" style="margin:0 0 6px">About {share:.0f}% of your spending is flexible. '
+              f'Fixed costs are the ones that repeat every month at about the same amount.</p>{fix_html}')
+
+
 def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:
     have = [x for x in win if x in d["months"]]
     if not have:
@@ -335,6 +402,7 @@ def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:
     chart = (charts.grouped_bars(have, [d["inc_tot"].get(x) for x in have], [d["exp_tot"].get(x) for x in have])
              + charts.data_table(["Month", "Income", "Expenses", "Kept"], [[short_label(x), f'{d["inc_tot"].get(x, 0):,.0f}', f'{d["exp_tot"].get(x, 0):,.0f}',
                                                                        f'{d["inc_tot"].get(x, 0) - d["exp_tot"].get(x, 0):,.0f}'] for x in have], "Income and expenses by month"))
+    chart += _period_stacks(conn, d, have, owner)
     cat_tot: dict[str, float] = {}
     cat_hi: dict[str, tuple[str, float]] = {}
     for x in have:

@@ -425,3 +425,14 @@ def test_a_merchant_you_approved_three_times_is_approved_by_itself(app, conn, ho
 
 def test_overview_says_how_far_the_statements_go(app):
     assert "Statements:" in text(get(app, "/"))
+
+
+def test_new_charts_render(app, conn):
+    from ftracker import charts
+    html = charts.stacked_bars(["Jan 26", "Feb 26"], [("Food", [10.0, 20.0]), ("Other", [5.0, 0.0])], "ILS", "x")
+    assert "Jan 26" in html and "data-tip" in html and "var(--cx)" in html
+    area = charts.stacked_area([("2026-01-01", [10.0, -5.0]), ("2026-06-01", [20.0, -4.0])], ["Cash", "Loans"], "ILS", "x")
+    assert "<polygon" in area and "2026-06" in area
+    assert charts.stacked_area([("2026-01-01", [1.0])], ["a"], "ILS", "x").startswith("<p")
+    page = text(get(app, "/?p=6"))
+    assert "Where it went, month by month" in page or "Based on the" in page

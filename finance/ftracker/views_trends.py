@@ -52,6 +52,16 @@ def _filter_panel(conn: sqlite3.Connection, ctx: Ctx, cur: str) -> str:
     return f'{state}<details class="card" style="margin-bottom:12px"{" open" if off else ""}><summary><b>Choose what counts in net worth</b></summary>{form}</details>'
 
 
+def _made_of(snaps, kinds, cur) -> str:
+    if len(snaps) < 2 or not kinds:
+        return ""
+    names = [KIND_LABEL[k] for k in kinds]
+    pts = [(s["as_of"], [sum(l["value"] for l in s["lines"] if l["kind"] == k) for k in kinds]) for s in snaps]
+    return (f'<section class="card" style="margin-top:16px"><h2>What it is made of, over time</h2>'
+            + charts.stacked_area(pts, names, cur, "Net worth by type over time")
+            + '<p class="muted">Each colour is a type of account. Debts, like a loan, sit below the line.</p></section>')
+
+
 def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wealth") -> str:
     cur = q.get("cur") if q.get("cur") in ("ILS", "USD") else "ILS"
     owner = q.get("owner") or None
@@ -108,8 +118,10 @@ def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wea
               f'typed value until you enter a new one. Dollar accounts use the current rate for every date, so the chart shows how your assets '
               f'moved, not the exchange rate.</p>')
     deltas = [(snaps[i]["as_of"], snaps[i]["total"] - snaps[i - 1]["total"]) for i in range(1, len(snaps))]
+    made_of = _made_of(snaps, kinds, cur)
     html = (f'<p>{who} &nbsp;·&nbsp; {money_sw}</p>{_filter_panel(conn, ctx, cur)}{tiles}{source}'
             f'<section class="card"><h2>Total over time</h2>{charts.line_chart(pts, cur, "Net worth over time")}</section>'
+            f'{made_of}'
             f'<section class="card" style="margin-top:16px"><h2>Change between updates</h2>{charts.bar_chart(deltas, cur, "Net worth change", signed=True)}'
             f'<p class="muted">Blue: it grew. Orange: it fell. Each bar is the change since the previous update of your balances.</p></section>'
             f'<section class="card" style="margin-top:16px"><h2>What it is made of</h2>{table}</section>'

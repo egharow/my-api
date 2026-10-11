@@ -115,6 +115,23 @@ def spending_by_category(conn: sqlite3.Connection, month: str | None = None, own
     return sorted(rows, key=lambda r: -r["spent"])
 
 
+def daily_spending(conn: sqlite3.Connection, month: str, owner: str | None = None) -> dict[int, float]:
+    """Spending per day of a calendar month, by the day it was paid or bought (not the month it is booked to)."""
+    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'", "t.amount < 0",
+             "substr(t.txn_date, 1, 7) = ?"]
+    args: list = [month]
+    apply_oneoff(conn, where, args)
+    if not include_reimbursed(conn):
+        where.append("c.reimbursed = 0")
+    if owner:
+        where.append("o.name = ?")
+        args.append(owner)
+    return {int(r[0]): r[1] for r in conn.execute(
+        f"""SELECT CAST(substr(t.txn_date, 9, 2) AS INTEGER), ROUND(SUM(-t.amount), 2)
+            FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
+            LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)} GROUP BY 1""", args)}
+
+
 def spending_by_source(conn: sqlite3.Connection, months: list[str], owner: str | None = None) -> dict[str, float]:
     """Spending split by where it was recorded: card statements, bank statements, or your old budget sheet."""
     if not months:
