@@ -107,7 +107,10 @@ def history_preview_page(conn: sqlite3.Connection, ctx: Ctx, data: "sheet_import
 # ---- setup --------------------------------------------------------------------------------------
 
 def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    who_opts = "".join(f'<option value="{esc(o)}"{" selected" if o == ctx.who else ""}>{esc(o)}</option>' for o in ctx.owners)
     out = ["<h1>Settings</h1>",
+           ('<div class="card" style="margin-bottom:12px"><b>Who is using the app?</b> <span class="muted">Used to sign your comments and approvals.</span> '
+            + _form(ctx, "/who", f'<select name="who">{who_opts}</select> <button class="quiet">Save</button>', "inline") + "</div>") if ctx.owners else "",
            '<div class="card" style="margin-bottom:12px"><div class="row"><a href="/items">Problems to check</a> · <a href="/imports">Imports and submit history</a> · '
            '<a href="/balances">Balances and dollar rate</a> · <a href="/goals">Goals</a> · <a href="/sheet">Google Sheet (optional)</a></div></div>']
     if ctx.starter and not conn.execute("SELECT 1 FROM settings WHERE key = 'seed_applied'").fetchone() and not conn.execute("SELECT 1 FROM owners").fetchone():

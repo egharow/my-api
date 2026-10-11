@@ -97,6 +97,31 @@ details.chg summary{cursor:pointer;color:var(--accent);font-size:13px}details.ch
 .acc .ed summary{cursor:pointer;color:var(--accent);font-size:13px}.acc .ed{grid-column:2/6}.oddrow{display:grid;grid-template-columns:40px minmax(0,1fr) 150px minmax(110px,170px);gap:10px;padding:6px 0;border-top:1px dashed var(--grid);font-size:14px;align-items:start}
 @media (max-width:640px){.oddrow{grid-template-columns:36px minmax(0,1fr) 110px}.oddrow>span:last-child{grid-column:2/4}}
 @media (max-width:600px){.hrow{grid-template-columns:90px 1fr 88px}.tile .v{font-size:22px}}
+
+html{-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 92%,transparent);backdrop-filter:blur(8px)}
+nav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}nav::-webkit-scrollbar{display:none}
+nav a{white-space:nowrap;font-weight:500;border-bottom-width:3px;padding:13px 12px}nav a:hover{color:var(--ink)}
+nav .quit{margin-left:6px;padding:4px 10px;font-size:13px;white-space:nowrap}
+h1{font-size:26px;letter-spacing:-.01em;margin:10px 0 14px}h2{font-size:17px}
+a{text-underline-offset:2px}.card,.cats,.trio>div,.tile{box-shadow:0 1px 2px rgba(0,0,0,.04)}
+.card{border-radius:12px}
+button:hover{filter:brightness(1.08)}button.quiet:hover{background:var(--page);filter:none}
+button:active{transform:translateY(1px)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+tbody tr:hover td{background:color-mix(in srgb,var(--accent) 4%,transparent)}
+.cat>summary:hover{background:color-mix(in srgb,var(--accent) 5%,transparent)}
+input:not([type=checkbox]):not([type=radio]),select{min-height:34px}
+.flash{border-left:4px solid var(--accent)}.flash.err{border-left-color:var(--critical)}
+.foot{text-align:center;color:var(--muted);font-size:12px;margin:24px 0 16px}
+.stickybar{position:sticky;top:50px;z-index:4;box-shadow:0 4px 10px rgba(0,0,0,.06)}
+.dataline{color:var(--muted);font-size:13px;margin:0 0 10px}
+.dataline b{color:var(--ink2);font-weight:600}
+.bud{display:grid;grid-template-columns:minmax(90px,150px) 1fr 130px;gap:10px;align-items:center;padding:7px 0;border-top:1px dashed var(--grid);font-size:14px}
+.bud .track{position:relative;height:10px;background:var(--grid);border-radius:5px}.bud .fill{position:absolute;left:0;top:0;height:10px;background:var(--s1);border-radius:5px}
+.bud .fill.over{background:var(--serious)}.bud .mark{position:absolute;top:-4px;width:2px;height:18px;background:var(--ink2)}
+@media (max-width:640px){.bud{grid-template-columns:90px 1fr 100px}h1{font-size:22px}main{padding:12px}}
+@media print{header,.todo,button,.modes,#tip{display:none}body{background:#fff}}
 """
 
 HEARTBEAT = """
@@ -141,11 +166,18 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     flash = f'<div class="flash {"err" if ctx.flash_kind == "err" else ""}" role="status">{esc(ctx.flash)}</div>' if ctx.flash else ""
     who_form = (_form(ctx, "/who", "<label class=muted>You are <select name=who onchange=this.form.submit()>" + who + "</select></label>", "inline")
                 if ctx.owners else "")
-    quit_form = _form(ctx, "/quit", "<button class=quiet title='Close the app'>Quit</button>", "inline")
+    quit_form = _form(ctx, "/quit", "<button class='quiet quit' title='Close the app'>Quit</button>", "inline")
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{esc(title)} · Finance</title><style>{CSS}</style></head><body><header><nav>" + "".join(links)
-            + "<span class=\"sp\"></span>" + ("" if ctx.readonly else who_form + quit_form)
-            + f"</nav></header><main>{flash}{body}</main><p class=\"muted\" style=\"text-align:center;font-size:12px\">Version {esc(BUILD)}</p><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
+            + "<span class=\"sp\"></span>" + ("" if ctx.readonly else quit_form)
+            + f"</nav></header><main>{flash}{body}</main><p class=\"foot\">Version {esc(BUILD)}</p><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
+
+
+def dmy(iso: str | None) -> str:
+    """2026-10-02 -> 02/10/2026 (dates as you write them)."""
+    if not iso or len(iso) < 10 or iso[4] != "-":
+        return iso or ""
+    return f"{iso[8:10]}/{iso[5:7]}/{iso[:4]}"
 
 
 def _tile(label: str, value: str, detail: str = "") -> str:
@@ -343,7 +375,7 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         lines = lines_by.get((g["key"], g["proposed"]), [])
         detail = ""
         if lines:
-            body = "".join(f'<tr><td>{esc(l["txn_date"])}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
+            body = "".join(f'<tr><td>{esc(dmy(l["txn_date"]))}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
                            f'<td class="n">{l["spent"]:,.2f}</td></tr>' for l in lines[:100])
             more = f'<small>Showing the newest 100 of {len(lines)}.</small>' if len(lines) > 100 else ""
             detail = (f'<details dir="ltr"><summary class="muted">show the {len(lines)} line(s)</summary><table><thead><tr><th>Date</th><th>Description</th>'
@@ -378,7 +410,7 @@ def items(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     out = [f"<h1>Needs attention</h1><p>{tabs}</p>"]
     fees = [f for f in reconcile.fee_status(conn, ctx.today) if f["state"] != "refunded"]
     for f in fees:
-        out.append(f'<div class="banner">Bank fee of {esc(money(f["amount"], "ILS", 2))} on {esc(f["date"])}: '
+        out.append(f'<div class="banner">Bank fee of {esc(money(f["amount"], "ILS", 2))} on {esc(dmy(f["date"]))}: '
                    f'{"overdue, no refund yet" if f["state"] == "overdue" else "refund expected by " + esc(f["due"])}</div>')
     body = []
     for d in rows:
@@ -399,7 +431,7 @@ def item(conn: sqlite3.Connection, ctx: Ctx, item_id: int) -> str:
         t = conn.execute("""SELECT t.*, c.name AS cat FROM transactions t JOIN categories c ON c.id = t.category_id
                             WHERE t.id = ?""", (d["subject_id"],)).fetchone()
         if t:
-            subject = (f'<p dir="auto"><b>{esc(t["description"])}</b> · {esc(t["txn_date"])} · {esc(money(t["amount"], t["currency"], 2))} · '
+            subject = (f'<p dir="auto"><b>{esc(t["description"])}</b> · {esc(dmy(t["txn_date"]))} · {esc(money(t["amount"], t["currency"], 2))} · '
                        f'{esc(t["cat"])} ({esc(t["category_status"])})</p>')
     thread = "".join(f'<div class="comment"><b>{esc(c["author"])}</b> <small>{esc(c["created_at"].replace("T", " "))}'
                      f'{" · edited" if c["edited_at"] else ""}</small><div dir="auto">{esc(c["body"])}</div></div>'
