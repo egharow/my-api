@@ -107,3 +107,14 @@ def create_desktop_shortcut(target: str, arguments: str, workdir: str, name: str
 def app_dir() -> Path:
     """Folder that holds Finance.pyw (the project root), when known."""
     return Path(__file__).resolve().parent.parent
+
+
+def lan_address() -> str | None:
+    """This computer's address on the home network (what a phone on the same Wi-Fi types), or None if it has none."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("10.255.255.255", 1))            # nothing is sent; this only picks the network card in use
+            ip = sock.getsockname()[0]
+        return None if ip.startswith("127.") else ip
+    except OSError:
+        return None

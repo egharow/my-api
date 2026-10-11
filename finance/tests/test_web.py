@@ -327,3 +327,42 @@ def test_sheet_mortgage_shows_in_categories_once_and_not_twice_in_totals(app, co
     lines = summary.category_lines(conn, "Mortgage", ["2025-04"])
     assert lines and lines[0]["spent"] == 6269.0 and "old budget sheet" in lines[0]["description"]
     assert "Mortgage" in text(get(app, "/spending?cat=Mortgage&month=2025-04"))
+
+
+def test_phone_mode_is_open_here_and_view_only_on_the_network(home, conn):
+    from urllib.parse import urlencode as enc
+    conn.commit()
+    app = App(home, today="2026-10-05", phone_pin="123456")
+    mine = app.handle("GET", "/setup", {"host": "localhost:8765"})
+    assert mine.status == 200                                                    # this computer needs no PIN
+    other = {"host": "192.168.1.20:8765", "x-client-ip": "192.168.1.55"}
+    assert app.handle("GET", "/", other).status == 401                           # a phone must log in first
+    wrong = app.handle("POST", "/login", other, enc({"pin": "000000"}).encode())
+    assert wrong.status == 403
+    ok = app.handle("POST", "/login", other, enc({"pin": "123456"}).encode())
+    cookie = dict(ok.headers)["Set-Cookie"].split(";")[0]
+    phone = {**other, "cookie": cookie}
+    page = app.handle("GET", "/", phone)
+    assert page.status == 200 and "Quit" not in text(page) and "change category" not in text(page)
+    assert app.handle("GET", "/wealth", phone).status == 200
+    for path in ("/setup", "/review", "/upload", "/balances"):
+        assert app.handle("GET", path, phone).status == 403                      # only Overview and Wealth
+    assert app.handle("POST", "/line/category", phone, b"id=1&category=Fun").status == 403
+    for _ in range(5):
+        app.handle("POST", "/login", other, enc({"pin": "999999"}).encode())
+    assert app.handle("POST", "/login", other, enc({"pin": "123456"}).encode()).status == 429   # guessing is slowed down
+    forged = app.handle("GET", "/setup", {"host": "192.168.1.20:8765"})
+    assert forged.status == 421                                                  # no client address counts as this computer, and it must use localhost
+
+
+def test_balances_page_has_a_draggable_fold_line_and_saves_the_order(app, conn):
+    from ftracker import balances as bal
+    page = text(get(app, "/balances"))
+    assert 'id="acc-list"' in page and "Below this line: only shown when expanded" in page and 'draggable="true"' in page
+    ids = [r["account_id"] for r in bal.latest(conn, "2026-10-05")]
+    assert len(ids) >= 3
+    res = post(app, "/accounts/arrange", {"order": ",".join(str(i) for i in reversed(ids)), "above": "2"})
+    assert res.status == 200
+    page = text(get(app, "/balances"))
+    assert "more account(s), shown only when expanded" in page
+    assert [r["account_id"] for r in bal.latest(conn, "2026-10-05")] == list(reversed(ids))

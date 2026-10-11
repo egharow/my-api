@@ -68,3 +68,47 @@ def test_salary_fixes_split_income_by_person_and_apply_to_waiting_lines(conn, ho
     both = summary.income_by_source(conn, ["2025-04"])
     assert both["2025-04"] == {"Salary (Shir)": 12000.0, "Salary (Ely)": 30000.0}
     assert summary.income_by_source(conn, ["2025-04"], "Shir")["2025-04"] == {"Salary (Shir)": 12000.0}
+
+
+def test_account_arrangement_and_fold_line_are_saved_and_applied(conn):
+    from ftracker import expected
+    for label in ("א", "ב", "ג", "ד"):
+        accounts.add_account(conn, "savings", "manual", label)
+    ids = {r["label"]: r["id"] for r in conn.execute("SELECT id, label FROM accounts WHERE kind = 'savings'")}
+    balances.set_arrangement(conn, [ids["ד"], ids["ג"], ids["ב"], ids["א"]], 2)
+    pend = balances.pending(conn, "2026-10-10")
+    assert [p["account"]["label"] for p in pend] == ["ד", "ג", "ב", "א"]
+    assert [p["folded"] for p in pend] == [False, False, True, True]
+    cl = expected.checklist(conn, "2026-10-10")
+    item = [i for g in cl["groups"] for i in g["items"] if i.get("children")][0]
+    assert "2 of 2 accounts" in item["detail"] and [k["folded"] for k in item["children"]] == [False, False, True, True]
+
+
+def test_fixed_costs_and_unusual_payments(conn, home):
+    from ftracker import insights
+    conn.execute("INSERT INTO accounts (kind, issuer, label, last4, currency, created_at) VALUES ('card','isracard','C','1','ILS','x')")
+    a = conn.execute("SELECT id FROM accounts WHERE kind='card'").fetchone()[0]
+    conn.execute("INSERT INTO batches (status, created_at) VALUES ('draft','x')")
+    b = conn.execute("SELECT id FROM batches").fetchone()[0]
+    cat = conn.execute("SELECT id FROM categories WHERE name = 'Insurance'").fetchone()[0]
+    fun = conn.execute("SELECT id FROM categories WHERE name = 'Fun'").fetchone()[0]
+    months = ["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+    n = 0
+
+    def add(m, desc, amt, c):
+        nonlocal n
+        n += 1
+        conn.execute("""INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description, description_norm, amount, currency,
+                        category_id, category_status, kind, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     (b, a, f"k{n}", f"{m}-05", m, desc, desc.upper(), -amt, "ILS", c, "approved", "purchase", "x"))
+    for m in months:
+        add(m, "PHOENIX INSURANCE", 300.0 if m != "2026-06" else 360.0, cat)
+        add(m, "CAFE ONE", 40.0, fun)
+        add(m, "CAFE TWO", 55.0, fun)
+    add("2026-06", "WEDDING HALL DEPOSIT", 2500.0, fun)
+    conn.commit()
+    fixed = insights.fixed_costs(conn, "2026-06", months)
+    ins = next(f for f in fixed if f["name"] == "PHOENIX INSURANCE")
+    assert ins["usual"] == 300.0 and ins["this"] == 360.0 and ins["status"] == "changed"
+    odd = insights.unusual(conn, "2026-06", months, None, fixed)
+    assert [o["description"] for o in odd] == ["WEDDING HALL DEPOSIT"] and "large" in odd[0]["why"]

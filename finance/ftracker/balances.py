@@ -83,6 +83,21 @@ def balances_due(conn: sqlite3.Connection, today: str) -> tuple[bool, str | None
     return (date.fromisoformat(today) - date.fromisoformat(last)).days > DUE_DAYS, last
 
 
+def fold_count(conn: sqlite3.Connection) -> int | None:
+    """How many accounts (from the top of your order) are always shown. The rest appear only when expanded. None: show all."""
+    row = conn.execute("SELECT value FROM settings WHERE key = 'balances_fold'").fetchone()
+    return int(row[0]) if row and row[0].isdigit() else None
+
+
+def set_arrangement(conn: sqlite3.Connection, ordered_ids: list[int], above: int) -> None:
+    """Save the order you dragged accounts into, and where the 'only shown when expanded' line sits."""
+    for n, aid in enumerate(ordered_ids, start=1):
+        conn.execute("UPDATE accounts SET sort_order = ? WHERE id = ?", (n, aid))
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('balances_fold', ?)", (str(max(0, min(above, len(ordered_ids)))),))
+    audit(conn, "accounts_arranged", "account", None, f"{len(ordered_ids)} accounts, {above} always shown")
+    conn.commit()
+
+
 def pending(conn: sqlite3.Connection, today: str, days: int = STALE_DAYS):
     """Every account that needs a typed balance, with its latest value (or None): the monthly to-do list."""
     cutoff = (date.fromisoformat(today) - timedelta(days=days)).isoformat()
@@ -94,4 +109,7 @@ def pending(conn: sqlite3.Connection, today: str, days: int = STALE_DAYS):
                              ORDER BY a.sort_order, o.name, a.kind, a.label""", (today,)):
         l = latest_by.get(a["id"])
         out.append({"account": a, "latest": l, "current": bool(l and l["as_of"] >= cutoff)})
+    fold = fold_count(conn)
+    for n, item in enumerate(out):
+        item["folded"] = fold is not None and n >= fold
     return out

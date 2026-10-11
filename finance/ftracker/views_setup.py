@@ -110,7 +110,7 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     out = ["<h1>Settings</h1>",
            '<div class="card" style="margin-bottom:12px"><div class="row"><a href="/items">Problems to check</a> · <a href="/imports">Imports and submit history</a> · '
            '<a href="/balances">Balances and dollar rate</a> · <a href="/goals">Goals</a> · <a href="/sheet">Google Sheet (optional)</a></div></div>']
-    if ctx.starter:
+    if ctx.starter and not conn.execute("SELECT 1 FROM settings WHERE key = 'seed_applied'").fetchone() and not conn.execute("SELECT 1 FROM owners").fetchone():
         out.append('<div class="banner"><b>Your starter setup is ready.</b> It adds the people, accounts and income rules prepared for you. '
                    + _form(ctx, "/setup/starter", "<button>Apply it</button>", "inline") + "</div>")
 
@@ -129,7 +129,8 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                + _form(ctx, "/setup/owner", '<input name="name" placeholder="New person (for example Shir)" required> <button class="quiet">Add person</button>', "row") + "</section>")
 
     accts = conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a LEFT JOIN owners o ON o.id = a.owner_id
-                            WHERE a.issuer != 'sheet' ORDER BY a.kind, a.label""").fetchall()
+                            WHERE a.issuer != 'sheet' AND a.active = 1 AND (a.closed_on IS NULL OR a.closed_on > ?)
+                            ORDER BY a.kind, a.label""", (ctx.today,)).fetchall()
     arows = ""
     for a in accts:
         opts = '<option value="">(nobody)</option>' + "".join(f'<option{" selected" if o["name"] == a["owner"] else ""}>{esc(o["name"])}</option>' for o in owners)
@@ -193,6 +194,18 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                               f'<span class="muted">{esc(c["owner"] or "")}</span> paid from <select name="payer">{opts}</select> <button class="quiet">Save</button>', "row"))
         out.append('<section class="card" style="margin-top:12px"><h2>Which account pays each card</h2><p class="muted">The app matches each card '
                    'statement to a bank payment. Say where each card is paid from, so it only looks in the right account.</p>' + "".join(rows) + "</section>")
+    if ctx.phone_pin:
+        phone = ('<p>Phone access is <b>on</b> after you restart the app.</p>'
+                 + (f'<p>On a phone connected to the same Wi-Fi, open <b>{esc(ctx.phone_url)}</b> and type the PIN <b style="font-size:20px">{esc(ctx.phone_pin)}</b>.</p>'
+                    if ctx.phone_url else '<p class="muted">This computer has no home-network address right now. Connect it to Wi-Fi first.</p>')
+                 + '<p class="muted">The phone can only look at the Overview and Wealth. Nothing can be changed from it.</p>'
+                 + _form(ctx, "/phone/off", '<button class="quiet">Turn phone access off</button>', "inline"))
+    else:
+        phone = ('<p class="muted">See your Overview on a phone, for example for Shir, while the app is open on this computer. '
+                 'It only works on your home Wi-Fi, the computer must be on, and the phone can look but never change anything.</p>'
+                 + _form(ctx, "/phone/on", '<button>Turn on phone access</button>', "inline")
+                 + '<p class="muted">Windows may ask whether to allow Python on the network the first time. Choose <b>Private networks</b> and Allow.</p>')
+    out.append('<section class="card" style="margin-top:12px"><h2>Open on a phone</h2>' + phone + "</section>")
     folder = watchfolder.get(conn)
     out.append('<section class="card" style="margin-top:12px"><h2>Statements from a folder (Google Drive)</h2>'
                '<p class="muted">Install Google Drive for desktop, save your statements into one Drive folder (from your phone too), '

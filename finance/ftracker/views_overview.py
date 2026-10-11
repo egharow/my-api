@@ -6,7 +6,7 @@ import sqlite3
 from datetime import date
 from html import escape as esc
 
-from . import balances, charts, expected, summary
+from . import balances, charts, expected, insights, summary
 from .charts import money
 from .views import Ctx, _form, counts, layout
 
@@ -72,6 +72,8 @@ def _cat_options(conn) -> str:
 
 
 def _change_form(ctx: Ctx, line_id, cats: str, back: str) -> str:
+    if ctx.readonly:
+        return ""
     if not line_id:
         return '<span class="cap">from your old sheet</span>'
     return ('<details class="chg"><summary>change category</summary>'
@@ -92,10 +94,12 @@ def _tiles(inc: float, exp: float, inv: float, label: str = "") -> str:
 
 
 def _tasks(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    if ctx.readonly:
+        return ""
     c = counts(conn)
     cl = expected.checklist(conn, ctx.today)
     missing = sum(1 for g in cl["groups"] for i in g["items"] if i["status"] == "todo" and not i.get("children"))
-    pend = [p for p in balances.pending(conn, ctx.today) if not p["current"]]
+    pend = [p for p in balances.pending(conn, ctx.today) if not p["current"] and not p["folded"]]
     drafts = conn.execute("SELECT COUNT(*) FROM batches WHERE status != 'committed'").fetchone()[0]
     chips = []
     if missing:
@@ -142,6 +146,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     find = (q.get("find") or "").strip()
     from . import firstrun
     loaded = firstrun.pending_notice(conn)
+    loaded = None if ctx.readonly else loaded
     notice = ('<div class="banner" style="border-color:var(--good)"><b>Your starting data is loaded.</b><ul>'
               + "".join(f"<li>{esc(x)}</li>" for x in loaded) + "</ul>"
               + _form(ctx, "/seed/dismiss", "<button class=quiet>Got it</button>", "inline") + "</div>") if loaded else ""
@@ -189,6 +194,8 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
 
 
 def _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) -> str:
+    if ctx.readonly:
+        return ""
     inc_r = summary.include_reimbursed(conn)
     win = [m] if mode == "month" else (months_between(frm, to) if mode == "custom" else [x for x in d["months"] if x <= end][-int(mode):])
     amount = sum(summary.reimbursed_total(conn, x) for x in win)
@@ -217,7 +224,7 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
     for cat, v in ranked:
         lines = summary.category_lines(conn, cat, [m], owner)
         line_rows = "".join(
-            f'<div><span>{esc(l["txn_date"][8:10])}/{esc(l["txn_date"][5:7])}</span><span dir="auto">{esc(l["description"])}'
+            f'<div><span>{esc(l["txn_date"][8:10])}/{esc(l["txn_date"][5:7])}</span><span><bdi dir="auto">{esc(l["description"])}</bdi>'
             f'<span class="cap"> · {esc(l["account"])}{"" if l["subcategory"] == cat else " · " + esc(l["subcategory"])}{" · ?" if l["category_status"] == "proposed" else ""}</span></span>'
             f'<span class="n">{money(l["spent"], "ILS", 0)}</span><span>{_change_form(ctx, l["id"], cats, back)}</span></div>' for l in lines)
         rows.append(f'<details class="cat"{" open" if open_cat == cat else ""}><summary><span class="tw">›</span><span dir="auto">{esc(cat)}</span>'
@@ -232,8 +239,32 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
                        for k, v in sorted(d["inc"].get(m, {}).items(), key=lambda kv: -kv[1]))
     income = (f'<details class="card" style="margin-top:14px"><summary><b>Where the income came from</b> <span class="cap">{money(inc)}</span></summary>{inc_rows}</details>'
               if inc_rows else "")
+    fixed = insights.fixed_costs(conn, m, d["months"], owner)
+    odd = insights.unusual(conn, m, d["months"], owner, fixed)
     return (f'{note}{_tiles(inc, exp, inv)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
-            f'<div class="cats">{head}{"".join(rows)}{foot}</div>{income}')
+            f'<div class="cats">{head}{"".join(rows)}{foot}</div>{_worth_a_look(ctx, odd, cats, back)}{_fixed_card(fixed, m)}{income}')
+
+
+def _worth_a_look(ctx, odd, cats, back) -> str:
+    if not odd:
+        return ""
+    rows = "".join(
+        f'<div class="oddrow"><span>{esc(o["date"][8:10])}/{esc(o["date"][5:7])}</span><span><bdi dir="auto">{esc(o["description"])}</bdi>'
+        f'<span class="cap"> · {esc(o["category"])} · {esc(o["why"])}</span></span><span class="n">{money(o["amount"], "ILS", 0)}</span>'
+        f'<span>{_change_form(ctx, o["id"], cats, back)}</span></div>' for o in odd)
+    return (f'<div class="card" style="margin-top:14px"><h4 style="margin:0 0 8px">Worth a look <span class="cap">payments that stand out this month</span></h4>{rows}</div>')
+
+
+def _fixed_card(fixed, m) -> str:
+    if not fixed:
+        return ""
+    tag = {"ok": '<span class="cap">✔ paid</span>', "changed": '<span class="up">▲ changed</span>', "not yet": '<span class="cap">not yet</span>',
+           "missing": '<span class="up">▲ not seen</span>'}
+    rows = "".join(
+        f'<div class="oddrow"><span></span><span><bdi dir="auto">{esc(f["name"])}</bdi><span class="cap"> · {esc(f["category"])} · seen in {f["months"]} of the last 6 months</span></span>'
+        f'<span class="n">{money(f["this"], "ILS", 0) if f["this"] is not None else "–"}'
+        f'<span class="cap"> usual {money(f["usual"], "ILS", 0)}</span></span><span>{tag[f["status"]]}</span></div>' for f in fixed)
+    return (f'<div class="card" style="margin-top:14px"><h4 style="margin:0 0 8px">Fixed costs <span class="cap">repeat every month at about the same amount</span></h4>{rows}</div>')
 
 
 def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:

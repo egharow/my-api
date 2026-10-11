@@ -18,9 +18,13 @@ def _group_html(g: dict) -> str:
         name = f'<a href="{esc(i["link"])}">{esc(i["label"])}</a>' if i.get("link") and i["status"] == "todo" else esc(i["label"])
         detail = f'{esc(word)} · {esc(i["detail"])}'
         if i.get("children"):
-            inner = "".join(
-                f'<div class="row" style="padding:2px 0"><span class="chip {MARK[k["status"]][1]}"><b aria-hidden="true">{MARK[k["status"]][0]}</b></span>'
-                f'<span dir="auto">{esc(k["label"])}</span><span class="muted">{esc(k["detail"])}</span></div>' for k in i["children"])
+            def one(k):
+                return (f'<div class="row" style="padding:2px 0"><span class="chip {MARK[k["status"]][1]}"><b aria-hidden="true">{MARK[k["status"]][0]}</b></span>'
+                        f'<span dir="auto">{esc(k["label"])}</span><span class="muted">{esc(k["detail"])}</span></div>')
+            shown = [k for k in i["children"] if not k.get("folded")]
+            hidden = [k for k in i["children"] if k.get("folded")]
+            inner = "".join(one(k) for k in shown) + (
+                f'<details><summary class="muted">{len(hidden)} more account(s), shown only when expanded</summary>{"".join(one(k) for k in hidden)}</details>' if hidden else "")
             detail = f'<details{" open" if i["status"] == "todo" else ""}><summary>{detail} · show which</summary>{inner}</details>'
         rows.append(f'<tr><td style="width:2em"><span class="chip {tone}"><b aria-hidden="true">{icon}</b></span></td>'
                     f'<td dir="auto">{name}</td><td class="muted">{detail}</td></tr>')

@@ -183,16 +183,16 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
                        "detail": src.get("detail") or ("nice to have, not required" if src["optional"] else "not uploaded yet")})
 
     pend = balances.pending(conn, today)
-    todo = [p for p in pend if not p["current"]]
+    todo = [p for p in pend if not p["current"] and not p["folded"]]            # accounts below your line only show when expanded
     kids = []
     for p in pend:
         l, a = p["latest"], p["account"]
         who = f"{a['owner']} · " if a["owner"] else ""
-        kids.append({"label": a["label"],
+        kids.append({"label": a["label"], "folded": p["folded"],
                      "status": "done" if p["current"] else "todo",
                      "detail": who + ((f"updated {l['as_of']}" if p["current"] else f"last value {l['as_of']}") if l else "never entered")})
     other.append({"label": "Balances (monthly)", "status": "todo" if todo else "done",
-                  "detail": (f"{len(todo)} of {len(pend)} accounts need a number" if todo else f"all {len(pend)} accounts are up to date"),
+                  "detail": (f"{len(todo)} of {len([p for p in pend if not p['folded']])} accounts need a number" if todo else "your main accounts are up to date"),
                   "link": "/balances", "children": kids})
     groups = [{"title": "Card statements", "items": cards}, {"title": "Bank statements", "items": banks},
               {"title": "Numbers you type", "items": other}]

@@ -21,6 +21,7 @@ from . import discrepancies as dx
 from .config import Home, migrate_legacy
 from .db import connect
 
+PHONE_PAGES = {"/", "/spending", "/trends", "/wealth", "/networth", "/health", "/ping"}
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 CSP = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; "
        "form-action 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
@@ -47,8 +48,14 @@ LOADING_PAGE = ("<!doctype html><meta charset=utf-8><meta http-equiv=refresh con
 
 class App:
     def __init__(self, home: Home, pin: str | None = None, lan: bool = False, today: str | None = None,
-                 app_dir: Path | None = None, watchdog: "appmode.Watchdog | None" = None, clock=time.time):
+                 app_dir: Path | None = None, watchdog: "appmode.Watchdog | None" = None, clock=time.time,
+                 phone_pin: str | None = None, port: int = 8765):
         self.home, self.pin, self.lan, self.fixed_today = home, pin, lan, today
+        self.phone = bool(phone_pin)              # phone mode: this computer is unrestricted, other devices need the PIN and may only look
+        if self.phone:
+            self.pin, self.lan = phone_pin, True
+        self.port = port
+        self._fails: dict[str, tuple[int, float]] = {}
         self.csrf = secrets.token_urlsafe(24)
         self._secret = secrets.token_bytes(32)
         self.app_dir = app_dir or appmode.app_dir()
@@ -68,20 +75,33 @@ class App:
     def handle(self, method: str, raw_path: str, headers: dict, body: bytes = b"") -> Response:
         headers = {k.lower(): v for k, v in headers.items()}
         host = headers.get("host", "").rsplit(":", 1)[0] if not headers.get("host", "").startswith("[") else headers["host"].split("]")[0] + "]"
-        if not self.lan and host not in LOCAL_HOSTS:
+        client = headers.get("x-client-ip", "")
+        remote = bool(client) and client not in ("127.0.0.1", "::1")
+        if (not self.lan or (self.phone and not remote)) and host not in LOCAL_HOSTS:
             return _html(421, "<h1>Wrong host</h1>")         # blocks DNS-rebinding style access
         cookies = SimpleCookie(headers.get("cookie", ""))
         url = urlparse(raw_path)
         path, q = url.path, {k: v[-1] for k, v in parse_qs(url.query).items()}
 
-        if self.pin:
+        if self.phone and not remote:
+            pass                                                          # this computer: no PIN
+        elif self.pin:
             if path == "/login" and method == "POST":
+                count, until = self._fails.get(client, (0, 0.0))
+                if count >= 5 and self.clock() < until:
+                    return _html(429, self._login_page("Too many wrong PINs. Wait a minute."))
                 form = {k: v[-1] for k, v in parse_qs(body.decode("utf-8")).items()}
                 if hmac.compare_digest(form.get("pin", ""), self.pin):
+                    self._fails.pop(client, None)
                     return Response(303, b"", [("Location", "/"), ("Set-Cookie", f"auth={self._auth_token()}; HttpOnly; SameSite=Strict; Path=/")])
+                self._fails[client] = (count + 1, self.clock() + 60)
                 return _html(403, self._login_page("Wrong PIN."))
             if not (cookies.get("auth") and hmac.compare_digest(cookies["auth"].value, self._auth_token())):
                 return _html(401, self._login_page())
+        if remote and self.phone and not (method == "GET" and path in PHONE_PAGES):
+            return _html(403, "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+                              "<body style='font:16px system-ui;max-width:420px;margin:60px auto;padding:0 16px'><h2>View only</h2>"
+                              "<p>From a phone you can look at the Overview and Wealth. Changes are made on the computer.</p><p><a href='/'>Back to the overview</a></p>")
 
         if path == "/health":      # for the launcher: is the app up, and has a window actually loaded it?
             seen = bool(self.watchdog and self.watchdog.last_ping is not None)
@@ -104,7 +124,13 @@ class App:
             ctx = views.Ctx(today=self._today(), who=who, csrf=self.csrf, owners=owners,
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
-                            data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS)
+                            data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS,
+                            readonly=remote and self.phone)
+            ph = conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone()
+            if ph and conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone():
+                ip = appmode.lan_address()
+                ctx.phone_pin = ph[0]
+                ctx.phone_url = f"http://{ip}:{self.port}/" if ip else ""
             if method == "POST":
                 return self._post(conn, ctx, path, headers, body)
             if path in ("/", "/balances", "/wealth") and not self.fixed_today:
@@ -384,6 +410,20 @@ class App:
                 fx.set_rate(conn, self._today(), "USD", "ILS", float(form["rate"].replace(",", "")), "manual")
                 conn.commit()
                 return self._redirect("/balances", f"Dollar rate set to {form['rate']}")
+            if path == "/phone/on":
+                pin = f"{secrets.randbelow(10 ** 6):06d}"
+                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('phone_access', '1')")
+                conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('phone_pin', ?)", (pin,))
+                conn.commit()
+                return self._redirect("/setup", "Phone access is set. Close the app with Quit and open it again to start it.")
+            if path == "/phone/off":
+                conn.execute("DELETE FROM settings WHERE key IN ('phone_access', 'phone_pin')")
+                conn.commit()
+                return self._redirect("/setup", "Phone access is off. Close the app with Quit and open it again.")
+            if path == "/accounts/arrange":
+                ids = [int(x) for x in form.get("order", "").split(",") if x.isdigit()]
+                balances.set_arrangement(conn, ids, int(form.get("above", "0") or 0))
+                return Response(200, b"ok", [("Content-Type", "text/plain")])
             if path in ("/accounts/move", "/accounts/rename", "/accounts/close", "/accounts/delete"):
                 try:
                     aid = int(form["id"])
@@ -489,12 +529,14 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
     conn = connect(home.db_path)
     try:
         need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn) or bool(datafixes.pending(conn, appmode.app_dir()))
+        phone_on = conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone()
+        phone_pin = (conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone() or [None])[0] if phone_on else None
     finally:
         conn.close()
     if lan and not pin:
         pin = f"{secrets.randbelow(10 ** 6):06d}"
     watchdog = appmode.Watchdog(time.time()) if app_mode else None
-    app = App(home, pin, lan, watchdog=watchdog)
+    app = App(home, pin if not phone_pin else None, lan or bool(phone_pin), watchdog=watchdog, phone_pin=phone_pin, port=port)
     app.loading = need_load
 
     def load_starting_data():
@@ -525,18 +567,23 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
             self.end_headers()
             self.wfile.write(res.body)
 
+        def _headers(self):
+            h = dict(self.headers)
+            h["X-Client-IP"] = self.client_address[0]            # set here, never taken from the request
+            return h
+
         def do_GET(self):
-            self._send(app.handle("GET", self.path, dict(self.headers)))
+            self._send(app.handle("GET", self.path, self._headers()))
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
             limit = uploads.MAX_BYTES + 1_000_000 if self.path in UPLOAD_PATHS else 1_000_000
-            self._send(app.handle("POST", self.path, dict(self.headers), self.rfile.read(min(n, limit))))
+            self._send(app.handle("POST", self.path, self._headers(), self.rfile.read(min(n, limit))))
 
         def log_message(self, *a):
             pass
 
-    httpd = ThreadingHTTPServer(("0.0.0.0" if lan else "127.0.0.1", port), Handler)
+    httpd = ThreadingHTTPServer(("0.0.0.0" if (lan or phone_pin) else "127.0.0.1", port), Handler)
     app.shutdown = httpd.shutdown
     url = f"http://localhost:{port}/"
     if watchdog:

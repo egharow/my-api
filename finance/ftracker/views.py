@@ -23,6 +23,9 @@ class Ctx:
     data_root: str = ""
     starter: bool = False
     can_shortcut: bool = False
+    readonly: bool = False          # a phone on the home network: look, never change
+    phone_url: str = ""
+    phone_pin: str = ""
 
 
 CSS = """
@@ -88,6 +91,10 @@ button{cursor:pointer;background:var(--accent);color:#fff;border-color:var(--acc
 .todo{display:flex;gap:8px;flex-wrap:wrap}.todo .chip{background:var(--surface);text-decoration:none;color:var(--ink);padding:5px 12px}
 details.chg summary{cursor:pointer;color:var(--accent);font-size:13px}details.chg form{margin-top:4px}
 @media (max-width:640px){.hidem{display:none}.trio{grid-template-columns:1fr}.cat>summary,.cat.head,.cat.foot{grid-template-columns:20px minmax(80px,1fr) 90px 100px}.cat .lines>div{grid-template-columns:40px minmax(0,1fr) 70px}.cat .lines>div>span:last-child{grid-column:2/4}}
+.acc{list-style:none;margin:0;padding:0}.acc li{display:grid;grid-template-columns:24px minmax(120px,1fr) minmax(120px,200px) 90px minmax(60px,auto);gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid var(--grid);background:var(--surface)}
+.acc li.dragging{opacity:.4}.acc .grab{cursor:grab;color:var(--muted);font-size:18px}.acc li.foldline{display:block;border:2px dashed var(--axis);border-radius:8px;margin:8px 0;padding:6px 12px;cursor:grab;color:var(--ink2);font-size:13px}
+.acc .ed summary{cursor:pointer;color:var(--accent);font-size:13px}.acc .ed{grid-column:2/6}.oddrow{display:grid;grid-template-columns:40px minmax(0,1fr) 150px minmax(110px,170px);gap:10px;padding:6px 0;border-top:1px dashed var(--grid);font-size:14px;align-items:start}
+@media (max-width:640px){.oddrow{grid-template-columns:36px minmax(0,1fr) 110px}.oddrow>span:last-child{grid-column:2/4}}
 @media (max-width:600px){.hrow{grid-template-columns:90px 1fr 88px}.tile .v{font-size:22px}}
 """
 
@@ -122,7 +129,7 @@ def counts(conn: sqlite3.Connection) -> dict:
 def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     c = counts(conn)
     links = []
-    for href, name in NAV:
+    for href, name in ([n for n in NAV if n[0] in ("/", "/wealth")] if ctx.readonly else NAV):
         badge = ""
         if href == "/review" and c["review"]:
             badge = f'<span class="badge">{c["review"]}</span>'
@@ -136,7 +143,7 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     quit_form = _form(ctx, "/quit", "<button class=quiet title='Close the app'>Quit</button>", "inline")
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{esc(title)} · Finance</title><style>{CSS}</style></head><body><header><nav>" + "".join(links)
-            + "<span class=\"sp\"></span>" + who_form + quit_form
+            + "<span class=\"sp\"></span>" + ("" if ctx.readonly else who_form + quit_form)
             + f"</nav></header><main>{flash}{body}</main><p class=\"muted\" style=\"text-align:center;font-size:12px\">Version {esc(BUILD)}</p><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
 
 
@@ -441,16 +448,18 @@ def imports(conn: sqlite3.Connection, ctx: Ctx) -> str:
 
 def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     due, last = balances.balances_due(conn, ctx.today)
-    rows = []
+    rows, folded_rows = [], []
     accts = conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
                             LEFT JOIN owners o ON o.id = a.owner_id
                             WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' AND (a.closed_on IS NULL OR a.closed_on > ?)
                             ORDER BY a.sort_order, a.kind, a.label""", (ctx.today,)).fetchall()
     latest = {r["account_id"]: r for r in balances.latest(conn, ctx.today)}
-    for a in accts:
+    fold = balances.fold_count(conn)
+    above = len(accts) if fold is None else min(fold, len(accts))
+    for n, a in enumerate(accts):
         l = latest.get(a["id"])
         stale = l and l["as_of"] < _days_ago(ctx.today, balances.STALE_DAYS)
-        rows.append(f'<tr><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td>'
+        (rows if n < above else folded_rows).append(f'<tr><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td>'
                     f'<td class="n">{esc(money(l["amount"], l["currency"]) if l else "–")}</td>'
                     f'<td>{esc(l["as_of"]) if l else ""}{" ▲ old" if stale else ""}</td>'
                     f'<td><input name="bal_{a["id"]}" inputmode="decimal" size="12" placeholder="new value"> {esc(a["currency"])}</td></tr>')
@@ -460,7 +469,10 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     form = _form(ctx, "/balances",
                  f'<p>Date of these numbers: <input type="date" name="as_of" value="{esc(ctx.today)}"></p>'
                  f'<div style="overflow-x:auto"><table><thead><tr><th>Account</th><th>Type</th><th>Owner</th><th class="n">Last value</th><th>As of</th><th>New value</th></tr></thead>'
-                 f'<tbody>{"".join(rows)}</tbody></table></div><p><button>Save the values I filled in</button> '
+                 f'<tbody>{"".join(rows)}</tbody></table>'
+                 + (f'<details style="margin-top:6px"><summary class="muted">{len(folded_rows)} more account(s), shown only when expanded</summary>'
+                    f'<table><tbody>{"".join(folded_rows)}</tbody></table></details>' if folded_rows else "")
+                 + f'</div><p><button>Save the values I filled in</button> '
                  f'<span class="muted">Leave a row empty to keep its last value. Loans can be entered as positive numbers.</span></p>')
     add = _form(ctx, "/accounts", f'<div class="row"><input name="label" placeholder="Account name" required> <select name="kind">{kinds}</select> '
                 f'<select name="currency"><option>ILS</option><option>USD</option></select> <select name="owner">{owner_opts}</select> <button class="quiet">Add account</button></div>')
@@ -471,7 +483,7 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                         '<button>Use this rate</button>' if cur_rate else
                         '<label>Today\'s rate (₪ per $) <input name="rate" inputmode="decimal" size="8" required></label> <button>Use this rate</button>', "row")
                 + _form(ctx, "/fx/refresh", '<button class="quiet">Fetch the current rate automatically</button>', "inline") + "</div>")
-    manage = []
+    items = []
     for n, a in enumerate(accts):
         arrows = (_form(ctx, "/accounts/move", f'<input type="hidden" name="id" value="{a["id"]}"><input type="hidden" name="dir" value="up">'
                         f'<button class="quiet" title="Move up" {"disabled" if n == 0 else ""}>▲</button>', "inline") + " "
@@ -484,10 +496,25 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                 + _form(ctx, "/accounts/delete", f'<input type="hidden" name="id" value="{a["id"]}"><button class="quiet">Delete it</button> '
                         '<span class="muted">removes it and all its balances, as if it never existed</span>', "row")
                 + "</details>")
-        manage.append(f'<tr><td style="white-space:nowrap">{arrows}</td><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td><td>{edit}</td></tr>')
-    arrange = ('<div class="card" style="margin-top:12px"><h2>Arrange your accounts</h2><p class="muted">Use the arrows to put accounts in the order you want. '
-               'The order is saved and used on every page. Rename, close or delete an account under Edit.</p>'
-               f'<div style="overflow-x:auto"><table><tbody>{"".join(manage)}</tbody></table></div></div>')
+        if n == above:
+            items.append('<li class="foldline" draggable="true" data-fold="1">▼ Below this line: only shown when expanded <span class="muted">(drag this line up or down)</span></li>')
+        items.append(f'<li draggable="true" data-id="{a["id"]}"><span class="grab" aria-hidden="true" title="Drag to move">⠿</span>'
+                     f'<span dir="auto" class="nm">{esc(a["label"])}</span><span class="muted">{esc(a["kind"])} · {esc(a["owner"] or "")}</span>'
+                     f'<span class="arrows">{arrows}</span><span class="ed">{edit}</span></li>')
+    if above >= len(accts):
+        items.append('<li class="foldline" draggable="true" data-fold="1">▼ Below this line: only shown when expanded <span class="muted">(drag this line up to hide accounts you rarely update)</span></li>')
+    arrange_js = ("(function(){var ul=document.getElementById('acc-list');if(!ul)return;var drag=null;"
+                  "ul.addEventListener('dragstart',function(e){drag=e.target.closest('li');if(drag){drag.classList.add('dragging');e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','x')}});"
+                  "ul.addEventListener('dragover',function(e){e.preventDefault();var over=e.target.closest('li');if(!drag||!over||over===drag)return;"
+                  "var r=over.getBoundingClientRect();ul.insertBefore(drag,(e.clientY-r.top)>r.height/2?over.nextSibling:over)});"
+                  "ul.addEventListener('dragend',function(){if(!drag)return;drag.classList.remove('dragging');drag=null;var ids=[],above=0,seen=false;"
+                  "ul.querySelectorAll('li').forEach(function(li){if(li.dataset.fold){seen=true}else{ids.push(li.dataset.id);if(!seen)above++}});"
+                  "var fd=new URLSearchParams();fd.set('csrf',ul.dataset.csrf);fd.set('order',ids.join(','));fd.set('above',above);"
+                  "fetch('/accounts/arrange',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:fd.toString()}).then(function(){var m=document.getElementById('saved');if(m){m.textContent='Order saved';setTimeout(function(){m.textContent=''},2000)}})})})();")
+    arrange = ('<div class="card" style="margin-top:12px"><h2>Arrange your accounts</h2><p class="muted">Drag an account by its handle ⠿ to put it where you want, or use the arrows. '
+               'Drag the dashed line to decide which accounts are always shown (above it) and which only appear when you expand the list (below it). '
+               'The order is saved the moment you drop. Rename, close or delete an account under Edit. <span id="saved" class="chip good" style="border:0"></span></p>'
+               f'<ul id="acc-list" class="acc" data-csrf="{esc(ctx.csrf)}">{"".join(items)}</ul></div><script>{arrange_js}</script>')
     return layout(conn, ctx, "/balances", "Balances",
                   f'<h1>Balances</h1>{banner}{rate_box}<div class="card">{form}</div>{arrange}<div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
 
