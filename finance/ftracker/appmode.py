@@ -118,3 +118,19 @@ def lan_address() -> str | None:
         return None if ip.startswith("127.") else ip
     except OSError:
         return None
+
+
+def tailscale_address(run=subprocess.run, which=shutil.which, exists=os.path.exists) -> str | None:
+    """The private Tailscale address of this computer (100.x.y.z), if Tailscale is installed and connected."""
+    exe = which("tailscale") or next((p for p in (r"C:\Program Files\Tailscale\tailscale.exe", r"C:\Program Files (x86)\Tailscale\tailscale.exe") if exists(p)), None)
+    if not exe:
+        return None
+    try:
+        out = run([exe, "ip", "-4"], capture_output=True, text=True, timeout=4, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in (out.stdout or "").split():
+        parts = line.strip().split(".")
+        if len(parts) == 4 and parts[0] == "100" and all(x.isdigit() for x in parts):
+            return line.strip()
+    return None

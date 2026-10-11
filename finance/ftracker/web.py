@@ -131,6 +131,8 @@ class App:
                 ip = appmode.lan_address()
                 ctx.phone_pin = ph[0]
                 ctx.phone_url = f"http://{ip}:{self.port}/" if ip else ""
+                ts = appmode.tailscale_address()
+                ctx.phone_anywhere = f"http://{ts}:{self.port}/" if ts else ""
             if method == "POST":
                 return self._post(conn, ctx, path, headers, body)
             if path in ("/", "/balances", "/wealth") and not self.fixed_today:

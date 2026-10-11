@@ -245,3 +245,12 @@ def test_desktop_shortcut_is_windows_only_and_reports_clearly_elsewhere(app):
         pytest.skip("covered by manual test on Windows")
     with pytest.raises(OSError):
         appmode.create_desktop_shortcut("x", "y", "z")
+
+
+def test_tailscale_address_is_read_from_the_tailscale_command():
+    from types import SimpleNamespace
+    ok = lambda *a, **k: SimpleNamespace(stdout="100.101.102.103\nfd7a:115c::1\n")
+    assert appmode.tailscale_address(run=ok, which=lambda n: "/usr/bin/tailscale") == "100.101.102.103"
+    assert appmode.tailscale_address(run=ok, which=lambda n: None, exists=lambda p: False) is None          # not installed
+    none = lambda *a, **k: SimpleNamespace(stdout="not logged in")
+    assert appmode.tailscale_address(run=none, which=lambda n: "/usr/bin/tailscale") is None

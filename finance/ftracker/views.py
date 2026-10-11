@@ -26,6 +26,7 @@ class Ctx:
     readonly: bool = False          # a phone on the home network: look, never change
     phone_url: str = ""
     phone_pin: str = ""
+    phone_anywhere: str = ""
 
 
 CSS = """

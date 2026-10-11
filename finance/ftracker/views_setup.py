@@ -194,17 +194,25 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                               f'<span class="muted">{esc(c["owner"] or "")}</span> paid from <select name="payer">{opts}</select> <button class="quiet">Save</button>', "row"))
         out.append('<section class="card" style="margin-top:12px"><h2>Which account pays each card</h2><p class="muted">The app matches each card '
                    'statement to a bank payment. Say where each card is paid from, so it only looks in the right account.</p>' + "".join(rows) + "</section>")
+    anywhere = ('<h3 style="margin:14px 0 4px;font-size:15px">From anywhere, not only your Wi-Fi</h3>'
+                '<p class="muted">Use <b>Tailscale</b>, a free private link between your own devices (free for personal use; see tailscale.com for current terms). '
+                'Nobody else can reach the app, and nothing is opened to the internet.</p>'
+                '<ol class="muted"><li>Install Tailscale on this computer and on the phone, and sign in with the same account on both.</li>'
+                '<li>Turn phone access on above and restart the app.</li>'
+                '<li>Open the Tailscale address shown here on the phone, from any network, and type the PIN.</li></ol>')
     if ctx.phone_pin:
-        phone = ('<p>Phone access is <b>on</b> after you restart the app.</p>'
-                 + (f'<p>On a phone connected to the same Wi-Fi, open <b>{esc(ctx.phone_url)}</b> and type the PIN <b style="font-size:20px">{esc(ctx.phone_pin)}</b>.</p>'
-                    if ctx.phone_url else '<p class="muted">This computer has no home-network address right now. Connect it to Wi-Fi first.</p>')
-                 + '<p class="muted">The phone can only look at the Overview and Wealth. Nothing can be changed from it.</p>'
-                 + _form(ctx, "/phone/off", '<button class="quiet">Turn phone access off</button>', "inline"))
+        where = (f'<p>From anywhere (Tailscale): <b>{esc(ctx.phone_anywhere)}</b></p>' if ctx.phone_anywhere else
+                 '<p class="muted">Tailscale was not found or is not connected on this computer, so there is no address for outside your Wi-Fi yet.</p>')
+        phone = ('<p>Phone access is <b>on</b> after you restart the app. PIN: <b style="font-size:20px">' + esc(ctx.phone_pin) + '</b></p>'
+                 + (f'<p>Same Wi-Fi: <b>{esc(ctx.phone_url)}</b></p>' if ctx.phone_url else '')
+                 + where
+                 + '<p class="muted">The phone can only look at the Overview and Wealth. Nothing can be changed from it. The app must be open on this computer.</p>'
+                 + _form(ctx, "/phone/off", '<button class="quiet">Turn phone access off</button>', "inline") + anywhere)
     else:
         phone = ('<p class="muted">See your Overview on a phone, for example for Shir, while the app is open on this computer. '
-                 'It only works on your home Wi-Fi, the computer must be on, and the phone can look but never change anything.</p>'
+                 'The phone can look but never change anything.</p>'
                  + _form(ctx, "/phone/on", '<button>Turn on phone access</button>', "inline")
-                 + '<p class="muted">Windows may ask whether to allow Python on the network the first time. Choose <b>Private networks</b> and Allow.</p>')
+                 + '<p class="muted">Windows may ask whether to allow Python on the network the first time. Choose <b>Private networks</b> and Allow.</p>' + anywhere)
     out.append('<section class="card" style="margin-top:12px"><h2>Open on a phone</h2>' + phone + "</section>")
     folder = watchfolder.get(conn)
     out.append('<section class="card" style="margin-top:12px"><h2>Statements from a folder (Google Drive)</h2>'
