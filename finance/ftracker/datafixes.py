@@ -54,7 +54,11 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
         conn.commit()
         return f"category {e['name']} added"
     if action == "add_rule":
-        categorize.add_rule_from_form(conn, e["pattern"], e["category"], e.get("mode", "expense"))
+        if e.get("set_kind") or e.get("direction"):
+            categorize.add_user_rule(conn, e["pattern"], e["category"], e.get("set_kind"), e.get("direction"))
+            conn.commit()
+        else:
+            categorize.add_rule_from_form(conn, e["pattern"], e["category"], e.get("mode", "expense"))
         return f"rule added: {e['pattern']} -> {e['category']}"
     acct = _account(conn, e.get("label") or e.get("from") or "")
     if action == "merge_accounts":
@@ -91,6 +95,7 @@ def apply(conn: sqlite3.Connection, home: Home, app_dir: Path, today: date | Non
     except Exception:
         print(traceback.format_exc())
     lines = []
+    from . import reconcile
     for e in todo:
         try:
             lines.append(_run(conn, e, today))
@@ -101,6 +106,8 @@ def apply(conn: sqlite3.Connection, home: Home, app_dir: Path, today: date | Non
         conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (f"datafix:{e['id']}", date.today().isoformat()))
         audit(conn, "data_fix", "settings", None, lines[-1])
         conn.commit()
+    reconcile.resolve_stale(conn)
+    conn.commit()
     # show what changed on the Home page, in the same notice as the first-start summary
     row = conn.execute("SELECT value FROM settings WHERE key = 'seed_summary'").fetchone()
     notice = json.loads(row[0]) if row else []

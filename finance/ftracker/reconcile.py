@@ -194,7 +194,20 @@ def fee_status(conn: sqlite3.Connection, today: str, batch_id: int | None = None
     return out
 
 
+def resolve_stale(conn: sqlite3.Connection) -> None:
+    """Close flags that no longer apply because you categorised the payment or gave the transfer a destination."""
+    for d in conn.execute("""SELECT d.fingerprint, d.type, t.category_status, t.kind, t.counterparty_account_id, c.name AS cat
+                             FROM discrepancies d JOIN transactions t ON t.id = d.subject_id JOIN categories c ON c.id = t.category_id
+                             WHERE d.status = 'open' AND d.subject_type = 'transaction' AND d.type IN ('transfer_destination', 'large_item')""").fetchall():
+        if d["type"] == "large_item" and d["category_status"] == "approved":
+            dx.auto_resolve(conn, d["fingerprint"], "category confirmed")
+        elif d["type"] == "transfer_destination" and (d["counterparty_account_id"] is not None or d["kind"] != "transfer"
+                                                       or d["cat"] not in ("Internal transfer", "Transfer to savings")):
+            dx.auto_resolve(conn, d["fingerprint"], "no longer needs a destination")
+
+
 def flag_large_and_transfers(conn: sqlite3.Connection, batch_id: int) -> None:
+    resolve_stale(conn)
     # Only statement imports raise flags. History imported from the old sheet is reviewed on the Review page.
     statement_batches = "(SELECT batch_id FROM source_files)"
     for t in conn.execute(f"SELECT * FROM transactions WHERE kind IN ('purchase','other') AND ABS(amount) >= ? "

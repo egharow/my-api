@@ -112,3 +112,26 @@ def test_fixed_costs_and_unusual_payments(conn, home):
     assert ins["usual"] == 300.0 and ins["this"] == 360.0 and ins["status"] == "changed"
     odd = insights.unusual(conn, "2026-06", months, None, fixed)
     assert [o["description"] for o in odd] == ["WEDDING HALL DEPOSIT"] and "large" in odd[0]["why"]
+
+
+def test_loan_payment_rule_and_stale_transfer_flags_close(conn, home, tmp_path):
+    import json as _json
+    conn.execute("INSERT INTO accounts (kind, issuer, label, last4, currency, created_at) VALUES ('bank','leumi','L','1','ILS','x')")
+    a = conn.execute("SELECT id FROM accounts WHERE kind='bank'").fetchone()[0]
+    conn.execute("INSERT INTO batches (status, created_at) VALUES ('draft','x')")
+    b = conn.execute("SELECT id FROM batches").fetchone()[0]
+    internal = conn.execute("SELECT id FROM categories WHERE name = 'Internal transfer'").fetchone()[0]
+    conn.execute("""INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description, description_norm, amount, currency,
+                    category_id, category_status, kind, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 (b, a, "k1", "2026-09-01", "2026-09", "בנק הפועלים-י", "בנק הפועלים-י", -1000.0, "ILS", internal, "proposed", "transfer", "x"))
+    tid = conn.execute("SELECT id FROM transactions").fetchone()[0]
+    from ftracker import discrepancies as dx, reconcile
+    dx.raise_item(conn, f"xfer:{tid}", "transfer_destination", "Transfer with no destination", "x", "info", ("transaction", tid), b)
+    conn.commit()
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(_json.dumps([
+        {"id": "l", "action": "add_rule", "pattern": "בנק הפועלים-י", "category": "Loans", "set_kind": "other", "direction": "out"}]), encoding="utf-8")
+    datafixes.apply(conn, home, app, date(2026, 10, 11))
+    row = conn.execute("SELECT c.name, t.category_status, t.kind FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.id = ?", (tid,)).fetchone()
+    assert (row["name"], row["category_status"], row["kind"]) == ("Loans", "approved", "other")
+    assert conn.execute("SELECT status FROM discrepancies WHERE fingerprint = ?", (f"xfer:{tid}",)).fetchone()[0] == "resolved"

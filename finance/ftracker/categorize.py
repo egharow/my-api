@@ -207,6 +207,8 @@ def approve(conn: sqlite3.Connection, txn_ids: list[int], category_name: str,
                             (txn_ids[0],)).fetchone()[0]
         key = merchant_key(desc)
         add_learned_rule(conn, key if len(key) >= 4 else desc, category_name)
+    from . import reconcile
+    reconcile.resolve_stale(conn)
     conn.commit()
     return len(txn_ids)
 
