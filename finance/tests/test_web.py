@@ -366,3 +366,32 @@ def test_balances_page_has_a_draggable_fold_line_and_saves_the_order(app, conn):
     page = text(get(app, "/balances"))
     assert "more account(s), shown only when expanded" in page
     assert [r["account_id"] for r in bal.latest(conn, "2026-10-05")] == list(reversed(ids))
+
+
+def test_one_off_limit_leaves_big_payments_out_everywhere_and_can_be_switched_off(app, conn):
+    from ftracker import summary
+    before = summary.month_overview(conn, "2026-10")["spending"]
+    assert summary.oneoff_left_out(conn, ["2026-10"]) == []
+    res = post(app, "/setting/oneoff", {"amount": "3,000"})
+    assert res.status == 303 and summary.oneoff_limit(conn) == 3000.0
+    left = summary.oneoff_left_out(conn, ["2026-10"])
+    assert any(o["spent"] == 3500.0 for o in left)
+    after = summary.month_overview(conn, "2026-10")["spending"]
+    assert after == round(before - sum(o["spent"] for o in left), 2)
+    assert "left out" in text(get(app, "/?p=month&m=2026-10"))
+    post(app, "/setting/oneoff", {"off": "1"})
+    assert summary.oneoff_limit(conn) == 0.0 and summary.month_overview(conn, "2026-10")["spending"] == before
+    assert post(app, "/setting/oneoff", {"amount": "abc"}).status == 303
+
+
+def test_close_the_month_checks_then_marks_it_and_can_reopen(app, conn):
+    from ftracker import closing
+    page = text(get(app, "/close?m=2026-09"))
+    assert "Close September 2026" in page and "Payments are sorted" in page
+    assert closing.to_close(conn, "2026-10-05") is not None
+    post(app, "/close/do", {"m": "2026-09"})
+    assert "2026-09" in closing.closed_months(conn) and closing.to_close(conn, "2026-10-05") != "2026-09"
+    assert "closed" in text(get(app, "/close?m=2026-09"))
+    post(app, "/close/do", {"m": "2026-09", "reopen": "1"})
+    assert "2026-09" not in closing.closed_months(conn)
+    assert get(app, "/close").status == 200

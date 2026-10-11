@@ -6,9 +6,9 @@ import sqlite3
 from datetime import date
 from html import escape as esc
 
-from . import balances, charts, expected, insights, summary
+from . import balances, charts, closing, expected, insights, summary
 from .charts import money
-from .views import Ctx, _form, counts, layout
+from .views import Ctx, _form, counts, dmy, layout
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 USUAL_MONTHS = 6
@@ -112,6 +112,9 @@ def _tasks(conn: sqlite3.Connection, ctx: Ctx) -> str:
         chips.append(f'<a class="chip" href="/items"><b>{c["items"]}</b> to check</a>')
     if drafts:
         chips.append(f'<a class="chip" href="/imports"><b>{drafts}</b> import(s) to submit</a>')
+    nxt = closing.to_close(conn, ctx.today)
+    if nxt:
+        chips.append(f'<a class="chip" href="/close?m={nxt}">Close {month_label(nxt)}</a>')
     body = "".join(chips) if chips else '<span class="cap">Nothing left to do. ✔</span>'
     return f'<div class="card" style="margin-top:14px"><h4 style="margin:0 0 8px">To do</h4><div class="todo">{body}</div></div>'
 
@@ -147,8 +150,8 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     from . import firstrun
     loaded = firstrun.pending_notice(conn)
     loaded = None if ctx.readonly else loaded
-    notice = ('<div class="banner" style="border-color:var(--good)"><b>Your starting data is loaded.</b><ul>'
-              + "".join(f"<li>{esc(x)}</li>" for x in loaded) + "</ul>"
+    notice = ('<div class="banner" style="border-left-color:var(--good)"><details><summary>Your starting data is loaded</summary><ul>'
+              + "".join(f"<li>{esc(x)}</li>" for x in loaded) + "</ul></details>"
               + _form(ctx, "/seed/dismiss", "<button class=quiet>Got it</button>", "inline") + "</div>") if loaded else ""
     from . import sheetsync
     st = sheetsync.status(conn)
@@ -173,7 +176,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     controls = _controls(base, mode, owner, m, end, frm, to, owners, find)
     cats = _cat_options(conn)
     back = base + _qs(**{k: v for k, v in q.items() if k in ("p", "m", "end", "from", "to", "owner", "open")})
-    vit = _vituri_note(conn, ctx, base, d, mode, m, end, frm, to)
+    vit = _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) + _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner)
 
     if find:
         rows = summary.find_lines(conn, find)
@@ -205,6 +208,25 @@ def _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) -> str:
             + _form(ctx, "/setting/reimbursed", f'<span>Vituri (paid back in cash), {money(amount)} here, is {"counted in" if inc_r else "left out of"} these numbers.</span> '
                     f'<input type="hidden" name="on" value="{0 if inc_r else 1}"><input type="hidden" name="next" value="/">'
                     f'<button class="quiet">{"Leave out" if inc_r else "Include"}</button>', "row") + "</p>")
+
+
+def _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner) -> str:
+    lim = summary.oneoff_limit(conn)
+    win = [m] if mode == "month" else (months_between(frm, to) if mode == "custom" else [x for x in d["months"] if x <= end][-int(mode):])
+    out = summary.oneoff_left_out(conn, win, owner)
+    if ctx.readonly:
+        return (f'<p class="cap">Payments above {money(lim)} are left out: {len(out)} here, {money(sum(o["spent"] for o in out))}.</p>' if lim else "")
+    if lim:
+        listing = ("<ul class='cap'>" + "".join(f'<li>{esc(dmy(o["txn_date"]))} · <bdi dir="auto">{esc(o["description"])}</bdi> · {esc(o["category"])} · {money(o["spent"])}</li>'
+                                               for o in out[:8]) + "</ul>") if out else ""
+        state = f'Single payments above <b>{money(lim)}</b> are left out ({len(out)} here, {money(sum(o["spent"] for o in out))}).'
+    else:
+        listing, state = "", "Big one-off payments (a car, a trip) are counted like everything else."
+    form = _form(ctx, "/setting/oneoff",
+                 f'<span>{state}</span> <label class="cap">Leave out payments above ₪ <input type="number" name="amount" min="0" step="100" value="{int(lim) if lim else ""}" '
+                 f'placeholder="e.g. 10000" style="width:110px"></label> <button class="quiet">Save</button>'
+                 + (' <button class="quiet" name="off" value="1">Count everything</button>' if lim else ""), "row")
+    return f'<div class="adjust cap">{form}{listing}</div>'
 
 
 def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:

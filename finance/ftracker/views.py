@@ -121,6 +121,41 @@ input:not([type=checkbox]):not([type=radio]),select{min-height:34px}
 .bud .track{position:relative;height:10px;background:var(--grid);border-radius:5px}.bud .fill{position:absolute;left:0;top:0;height:10px;background:var(--s1);border-radius:5px}
 .bud .fill.over{background:var(--serious)}.bud .mark{position:absolute;top:-4px;width:2px;height:18px;background:var(--ink2)}
 @media (max-width:640px){.bud{grid-template-columns:90px 1fr 100px}h1{font-size:22px}main{padding:12px}}
+/* look and feel */
+body{font-feature-settings:"tnum" 1,"cv11" 1;letter-spacing:.005em}
+nav a{border-bottom:0;border-radius:8px;margin:7px 1px;padding:6px 13px}
+nav a.on{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
+nav a:hover{background:color-mix(in srgb,var(--ink) 5%,transparent)}
+nav .badge{background:var(--s2);font-weight:600;min-width:20px;text-align:center}
+h1{font-weight:700}h3{letter-spacing:-.005em}
+.trio>div{position:relative;overflow:hidden;padding:14px 18px}
+.trio>div::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--axis)}
+.trio>div:nth-child(1)::before{background:var(--s1)}.trio>div:nth-child(2)::before{background:var(--s2)}.trio>div:nth-child(3)::before{background:var(--good)}
+.trio b{font-size:28px;font-weight:700;letter-spacing:-.01em}
+.card,.cats,.trio>div,.tile{box-shadow:0 1px 3px rgba(20,20,10,.06),0 0 0 1px rgba(20,20,10,.02)}
+.cats{padding:6px 18px}.cat>summary{padding:12px 0}.cat>summary:hover{background:transparent}.cat>summary:hover .n{color:var(--accent)}
+.cat.head{padding-top:12px;text-transform:uppercase;letter-spacing:.04em;font-size:11px}
+.share .t{height:9px;border-radius:5px}.share .t span{height:9px;border-radius:5px;background:linear-gradient(90deg,var(--s2),color-mix(in srgb,var(--s2) 70%,#fff))}
+.cat .lines{background:color-mix(in srgb,var(--page) 70%,transparent);border-radius:8px;padding:2px 12px;margin:0 0 12px 22px}
+.todo .chip{border-radius:999px;transition:background .15s,border-color .15s}.todo .chip:hover{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.todo .chip b{color:var(--accent)}
+button{border-radius:8px;padding:6px 14px;font-weight:500}
+button.quiet{padding:5px 12px}
+input:not([type=checkbox]):not([type=radio]),select{border-radius:8px;border-color:var(--axis);background:var(--surface)}
+input:focus,select:focus{border-color:var(--accent);outline:0;box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+.banner{border-radius:10px;border:1px solid var(--border);border-left:4px solid var(--warning);box-shadow:0 1px 3px rgba(20,20,10,.05)}
+.banner details summary{font-weight:600;color:var(--ink)}
+.adjust{margin-top:12px;background:var(--surface);border:1px dashed var(--axis);border-radius:12px;padding:10px 14px}
+.adjust form{margin:0}.adjust ul{margin:8px 0 0;padding-left:18px}
+.chk{display:grid;grid-template-columns:30px 1fr auto;gap:10px;align-items:center;padding:12px 2px;border-bottom:1px solid var(--grid)}
+.chk:last-child{border-bottom:0}
+.chk .mark{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-weight:700;font-size:14px;color:#fff;background:var(--good)}
+.chk.todo .mark{background:var(--warning);color:#3a2a00}
+.chk .cap{display:block}
+.btnlink{display:inline-block;padding:4px 14px;border:1px solid var(--accent);border-radius:999px;text-decoration:none;font-size:14px}
+.btnlink:hover{background:var(--accent);color:#fff}
+.chip.good{background:color-mix(in srgb,var(--good) 10%,transparent);border-color:color-mix(in srgb,var(--good) 40%,transparent)}
+@media (max-width:640px){.trio b{font-size:24px}.cats{padding:4px 12px}}
 @media print{header,.todo,button,.modes,#tip{display:none}body{background:#fff}}
 """
 

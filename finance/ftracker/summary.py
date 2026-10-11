@@ -33,6 +33,48 @@ def set_include_reimbursed(conn: sqlite3.Connection, on: bool) -> None:
     conn.commit()
 
 
+def oneoff_limit(conn: sqlite3.Connection) -> float:
+    """Single payments above this amount are left out of spending (0 = nothing is left out)."""
+    row = conn.execute("SELECT value FROM settings WHERE key = 'oneoff_limit'").fetchone()
+    try:
+        return max(0.0, float(row[0])) if row else 0.0
+    except ValueError:
+        return 0.0
+
+
+def set_oneoff_limit(conn: sqlite3.Connection, amount: float) -> None:
+    conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('oneoff_limit', ?)", (str(max(0.0, amount)),))
+    conn.commit()
+
+
+def apply_oneoff(conn: sqlite3.Connection, where: list, args: list) -> None:
+    """Adds the 'leave out big one-off payments' filter to a query on transactions t."""
+    lim = oneoff_limit(conn)
+    if lim > 0:
+        where.append("-t.amount <= ?")
+        args.append(lim)
+
+
+def oneoff_left_out(conn: sqlite3.Connection, months: list[str], owner: str | None = None) -> list[dict]:
+    """The payments the limit leaves out of these months (largest first)."""
+    lim = oneoff_limit(conn)
+    if lim <= 0 or not months:
+        return []
+    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'", "-t.amount > ?",
+             f"t.budget_month IN ({','.join('?' * len(months))})"]
+    args: list = [lim, *months]
+    if not include_reimbursed(conn):
+        where.append("c.reimbursed = 0")
+    if owner:
+        where.append("o.name = ?")
+        args.append(owner)
+    return [dict(r) for r in conn.execute(
+        f"""SELECT t.id, t.txn_date, t.description, -t.amount AS spent, COALESCE(p.name, c.name) AS category
+            FROM transactions t JOIN categories c ON c.id = t.category_id LEFT JOIN categories p ON p.id = c.parent_id
+            JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
+            WHERE {' AND '.join(where)} ORDER BY spent DESC""", args)]
+
+
 def reimbursed_total(conn: sqlite3.Connection, month: str, owner: str | None = None, committed_only: bool = False) -> float:
     args: list = [month]
     extra = ""
@@ -52,6 +94,7 @@ def spending_by_category(conn: sqlite3.Connection, month: str | None = None, own
     args: list = []
     if not include_reimbursed(conn):
         where.append("c.reimbursed = 0")
+    apply_oneoff(conn, where, args)
     if month:
         where.append("t.budget_month = ?")
         args.append(month)
@@ -94,6 +137,7 @@ def spending_by_source(conn: sqlite3.Connection, months: list[str], owner: str |
     where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'",
              f"t.budget_month IN ({','.join('?' * len(months))})"]
     args: list = list(months)
+    apply_oneoff(conn, where, args)
     if not include_reimbursed(conn):
         where.append("c.reimbursed = 0")
     if owner:
@@ -149,6 +193,7 @@ def category_lines(conn: sqlite3.Connection, category: str, months: list[str], o
     where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'",
              "COALESCE(p.name, c.name) = ?", f"t.budget_month IN ({','.join('?' * len(months))})"]
     args: list = [category, *months]
+    apply_oneoff(conn, where, args)
     if not include_reimbursed(conn):
         where.append("c.reimbursed = 0")
     if owner:

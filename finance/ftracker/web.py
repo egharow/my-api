@@ -15,7 +15,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_overview, views_setup, views_trends
+from . import appmode, balances, categorize, closing, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_close, views_overview, views_setup, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -198,6 +198,8 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/close":
+            return _html(200, views_close.close_page(conn, ctx, q))
         if path == "/review":
             return _html(200, views.review(conn, ctx, q))
         if path == "/items":
@@ -517,6 +519,20 @@ class App:
             if path == "/setting/reimbursed":
                 summary.set_include_reimbursed(conn, form.get("on") == "1")
                 return self._redirect(form.get("next") if form.get("next") in ("/", "/spending") else "/", "Vituri is now " + ("counted in" if form.get("on") == "1" else "left out of") + " spending")
+            if path == "/close/do":
+                m = form.get("m", "")
+                if len(m) != 7:
+                    return self._redirect("/", "Pick a month.", err=True)
+                closing.set_closed(conn, m, form.get("reopen") != "1")
+                return self._redirect("/" if form.get("reopen") != "1" else f"/close?m={m}",
+                                      f"{m} is closed" if form.get("reopen") != "1" else f"{m} is open again")
+            if path == "/setting/oneoff":
+                try:
+                    amount = 0.0 if form.get("off") else float((form.get("amount") or "0").replace(",", ""))
+                except ValueError:
+                    return self._redirect("/", "Type the amount as a number.", err=True)
+                summary.set_oneoff_limit(conn, amount)
+                return self._redirect("/", f"Payments above ₪{amount:,.0f} are now left out" if amount > 0 else "Everything is counted again")
             if path == "/fx/refresh":
                 res = fx.refresh_current(conn, self._today(), force=True)
                 if res["status"] == "failed":

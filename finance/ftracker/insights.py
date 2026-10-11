@@ -18,6 +18,7 @@ def _lines(conn: sqlite3.Connection, months: list[str], owner: str | None):
     where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'", "t.amount < 0",
              f"t.budget_month IN ({','.join('?' * len(months))})"]
     args: list = list(months)
+    summary.apply_oneoff(conn, where, args)
     if not summary.include_reimbursed(conn):
         where.append("c.reimbursed = 0")
     if owner:
