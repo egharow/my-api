@@ -139,6 +139,7 @@ def test_loan_payment_rule_and_stale_transfer_flags_close(conn, home, tmp_path):
 
 def test_a_payment_moved_out_of_a_transfer_category_becomes_an_ordinary_expense(conn, home, tmp_path):
     import json as _json
+    from ftracker.normalize import norm_description
     conn.execute("INSERT INTO accounts (kind, issuer, label, last4, currency, created_at) VALUES ('bank','leumi','L','1','ILS','x')")
     a = conn.execute("SELECT id FROM accounts WHERE kind='bank'").fetchone()[0]
     conn.execute("INSERT INTO batches (status, created_at) VALUES ('draft','x')")
@@ -146,7 +147,7 @@ def test_a_payment_moved_out_of_a_transfer_category_becomes_an_ordinary_expense(
     household = conn.execute("SELECT id FROM categories WHERE name = 'Transfer to household'").fetchone()[0]
     conn.execute("""INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description, description_norm, amount, currency,
                     category_id, category_status, kind, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                 (b, a, "k1", "2026-08-21", "2026-08", 'העברת זה"ב', 'העברת זהב', -42000.0, "ILS", household, "approved", "transfer", "x"))
+                 (b, a, "k1", "2026-08-21", "2026-08", 'העברת זה"ב', norm_description('העברת זה"ב'), -42000.0, "ILS", household, "approved", "transfer", "x"))
     conn.commit()
     app = tmp_path / "app"; app.mkdir()
     (app / "data_fixes.json").write_text(_json.dumps([
