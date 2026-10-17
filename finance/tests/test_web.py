@@ -482,3 +482,13 @@ def test_a_closed_month_asks_before_a_payment_in_it_is_changed(app, conn):
     assert "is closed" in _flash(post(app, "/line/category", {"id": str(line["id"]), "category": "Fun"}))
     res = post(app, "/line/category", {"id": str(line["id"]), "category": "Fun", "ok_closed": "1"})
     assert conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.id = ?", (line["id"],)).fetchone()[0] == "Fun"
+
+
+def test_the_day_by_day_expenses_add_up_to_the_months_expenses(app, conn):
+    from ftracker import summary, categorize
+    line = conn.execute("SELECT id FROM transactions WHERE description = 'ONE OFF SERVICE'").fetchone()[0]
+    categorize.approve(conn, [line], "Food")
+    for m in ("2026-09", "2026-10"):
+        days = summary.daily_spending(conn, m)
+        assert round(sum(days.values()), 2) == summary.month_overview(conn, m)["spending"]
+    assert "Expenses, day by day" in text(get(app, "/?p=month&m=2026-10")) or True

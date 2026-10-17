@@ -116,9 +116,10 @@ def spending_by_category(conn: sqlite3.Connection, month: str | None = None, own
 
 
 def daily_spending(conn: sqlite3.Connection, month: str, owner: str | None = None) -> dict[int, float]:
-    """Spending per day of a calendar month, by the day it was paid or bought (not the month it is booked to)."""
-    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'", "t.amount < 0",
-             "substr(t.txn_date, 1, 7) = ?"]
+    """Spending per day of a month, counted the way the month's total is: money leaves your account on the payment day,
+    and card spending lands on the day the card is billed. The days add up to the month's expenses."""
+    import calendar
+    where = ["c.neutral = 0", "c.kind IN ('expense','fee','debt')", "t.kind != 'card_payment'", "t.currency = 'ILS'", "t.budget_month = ?"]
     args: list = [month]
     apply_oneoff(conn, where, args)
     if not include_reimbursed(conn):
@@ -126,10 +127,16 @@ def daily_spending(conn: sqlite3.Connection, month: str, owner: str | None = Non
     if owner:
         where.append("o.name = ?")
         args.append(owner)
-    return {int(r[0]): r[1] for r in conn.execute(
-        f"""SELECT CAST(substr(t.txn_date, 9, 2) AS INTEGER), ROUND(SUM(-t.amount), 2)
-            FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
-            LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)} GROUP BY 1""", args)}
+    last = calendar.monthrange(int(month[:4]), int(month[5:7]))[1]
+    out: dict[int, float] = {}
+    for r in conn.execute(
+            f"""SELECT COALESCE(t.billing_date, t.txn_date) AS d, -t.amount AS spent
+                FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
+                LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)}""", args):
+        d = r["d"]
+        day = int(d[8:10]) if d[:7] == month else (1 if d[:7] < month else last)
+        out[day] = round(out.get(day, 0.0) + r["spent"], 2)
+    return out
 
 
 def spending_by_source(conn: sqlite3.Connection, months: list[str], owner: str | None = None) -> dict[str, float]:

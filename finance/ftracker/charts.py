@@ -352,7 +352,7 @@ def pace_chart(this: list[float | None], usual: list[float], low: list[float], h
     def sy(v):
         return T + (H - T - B) * (1 - v / top)
 
-    out = [_legend([("This month", "--s2"), ("Usual month", "--axis")]),
+    out = [_legend([("This month, expenses so far", "--s2"), ("Usual month", "--axis")]),
            f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
     for t in ticks:
         y = sy(t)
@@ -372,7 +372,7 @@ def pace_chart(this: list[float | None], usual: list[float], low: list[float], h
                    f'<text x="{sx(d) + 8:.1f}" y="{sy(v) + 4:.1f}" class="direct">{escape(compact(v, currency))}</text>')
     for d in range(n):
         v = this[d] if d < len(this) else None
-        tip = f"{d + 1}/{month[5:7]}: " + (f"{money(v, currency)} so far, " if v is not None else "") + f"usual {money(usual[d], currency)}"
+        tip = f"{d + 1}/{month[5:7]}: " + (f"spent {money(v, currency)} so far, " if v is not None else "") + f"usually {money(usual[d], currency)} by now"
         out.append(f'<rect x="{sx(d + 1) - (W - L - R) / (n - 1) / 2:.1f}" y="{T}" width="{(W - L - R) / (n - 1):.1f}" height="{H - T - B}" '
                    f'fill="transparent" data-tip="{escape(tip)}"/>')
     for d in range(1, n + 1, 5):

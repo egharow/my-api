@@ -295,11 +295,13 @@ def _pace(conn, ctx, d, m, owner) -> str:
         return ""
     this = [mine[i] if i < cutoff else None for i in range(n)]
     ahead = mine[cutoff - 1] - usual[cutoff - 1]
-    verdict = (f"{money(abs(ahead))} {'above' if ahead > 0 else 'below'} a usual month at this point" if abs(ahead) >= 1 else "right on a usual month")
-    return ('<div class="card" style="margin-top:14px"><h4 style="margin:0 0 4px">How the month unfolded</h4>'
-            f'<p class="cap" style="margin:0 0 8px">{verdict}. The grey band is the range of your last {len(earlier)} months. '
-            'It counts each payment on the day you made it, so it can differ from the totals above, which put card payments in the month they are billed.</p>'
-            + charts.pace_chart(this, usual, low, high, "ILS", "Spending added up through the month", m) + "</div>")
+    verdict = (f"Expenses so far are {money(abs(ahead))} {'above' if ahead > 0 else 'below'} what you usually have spent by this day of the month"
+               if abs(ahead) >= 1 else "Expenses so far are right on what you usually have spent by this day")
+    return ('<div class="card" style="margin-top:14px"><h4 style="margin:0 0 4px">Expenses, day by day</h4>'
+            f'<p class="cap" style="margin:0 0 8px">{verdict}. This is only expenses, not income. Each step up is money leaving your accounts: '
+            'card spending counts on the day the card is billed, everything else on the day it was paid. '
+            f'The line ends at the Expenses total above. The dashed line is your usual month and the grey band is the range of your last {len(earlier)} months.</p>'
+            + charts.pace_chart(this, usual, low, high, "ILS", "Expenses added up through the month", m) + "</div>")
 
 
 def _budget_month(conn, ctx, spend, owner) -> str:
