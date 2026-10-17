@@ -334,6 +334,22 @@ class App:
                 if auto:
                     msg += f". {auto} more approved by themselves (merchants you have approved 3+ times)"
                 return self._redirect("/review", msg, err=bool(skipped and not done))
+            if path == "/approve/suggested":
+                groups = conn.execute(
+                    """SELECT t.description_norm AS key, c.name AS cat FROM transactions t JOIN categories c ON c.id = t.category_id
+                       JOIN batches b ON b.id = t.batch_id
+                       WHERE t.category_status = 'proposed' AND b.status != 'committed' AND c.name != 'Uncategorised'
+                       GROUP BY t.description_norm, c.name""").fetchall()
+                done = 0
+                for g in groups:
+                    ids = [r[0] for r in conn.execute(
+                        """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id JOIN categories c ON c.id = t.category_id
+                           WHERE t.category_status = 'proposed' AND t.description_norm = ? AND c.name = ? AND b.status != 'committed'""", (g["key"], g["cat"]))]
+                    if ids:
+                        done += categorize.approve(conn, ids, g["cat"], learn=False, actor=who)
+                left = conn.execute("SELECT COUNT(DISTINCT description_norm) FROM transactions t JOIN batches b ON b.id = t.batch_id "
+                                    "WHERE t.category_status = 'proposed' AND b.status != 'committed'").fetchone()[0]
+                return self._redirect("/review", f"{done} line(s) approved as suggested. {left} merchant(s) still need a category from you.")
             if path == "/approve":
                 ids = [r[0] for r in conn.execute(
                     """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id

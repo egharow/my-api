@@ -492,3 +492,16 @@ def test_the_day_by_day_expenses_add_up_to_the_months_expenses(app, conn):
         days = summary.daily_spending(conn, m)
         assert round(sum(days.values()), 2) == summary.month_overview(conn, m)["spending"]
     assert "Expenses, day by day" in text(get(app, "/?p=month&m=2026-10")) or True
+
+
+def test_one_click_approves_every_suggestion_and_leaves_the_rest(app, conn):
+    before = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status = 'proposed'").fetchone()[0]
+    page = text(get(app, "/review?show=all"))
+    suggested = conn.execute("""SELECT COUNT(*) FROM transactions t JOIN categories c ON c.id = t.category_id
+                                WHERE t.category_status = 'proposed' AND c.name != 'Uncategorised'""").fetchone()[0]
+    res = post(app, "/approve/suggested", {})
+    assert res.status == 303
+    after = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status = 'proposed'").fetchone()[0]
+    assert before - after == suggested
+    assert conn.execute("""SELECT COUNT(*) FROM transactions t JOIN categories c ON c.id = t.category_id
+                           WHERE t.category_status = 'proposed' AND c.name != 'Uncategorised'""").fetchone()[0] == 0

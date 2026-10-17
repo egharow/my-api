@@ -524,7 +524,11 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
                     f'<td>{form}<small>{esc(g["basis"] or "")}</small></td></tr>')
     if rows:
         bulk_opts = '<option value="">each one\'s proposed category</option>' + "".join(f"<option>{esc(c[0])}</option>" for c in cats)
-        out.append('<div class="card" style="margin-bottom:12px"><b>Approve several at once</b> '
+        sugg = n_match
+        quick = (_form(ctx, "/approve/suggested", f'<button>Approve all {sugg} suggestions</button> '
+                       '<span class="cap">One click. Every merchant that has a suggested category gets it. The ones with no suggestion stay for you.</span>', "row")
+                 if sugg and show != "none" else "")
+        out.append(f'<div class="card" style="margin-bottom:12px">{quick}<b>Approve several at once</b> '
                    '<form id="bulk" method="post" action="/approve/bulk" class="row" style="margin-top:6px">'
                    f'<input type="hidden" name="csrf" value="{esc(ctx.csrf)}">'
                    f'<select name="category">{bulk_opts}</select> '
