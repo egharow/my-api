@@ -260,7 +260,7 @@ def _oneoff_note(conn, ctx, d, mode, m, end, frm, to, owner, back="/") -> str:
         return (f'<div class="oddrow"><span>{esc(o["txn_date"][8:10])}/{esc(o["txn_date"][5:7])}</span><span><bdi dir="auto">{esc(o["description"])}</bdi>'
                 f'<span class="cap"> · {esc(o["category"])}</span></span><span class="n">{money(o["spent"], "ILS", 0)}</span><span>{undo}</span></div>')
     return (f'<div class="adjust"><b>Left out of the numbers</b> <span class="cap">{len(out)} payment(s), {money(sum(o["spent"] for o in out))}. '
-            f'You chose these as one-offs.</span>{"".join(row(o) for o in out)}</div>')
+            f'You chose these as one-offs. <a href="/leftout">See every month</a></span>{"".join(row(o) for o in out)}</div>')
 
 
 def _pace(conn, ctx, d, m, owner) -> str:

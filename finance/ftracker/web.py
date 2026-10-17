@@ -203,6 +203,8 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/leftout":
+            return _html(200, views_budget.left_out_page(conn, ctx))
         if path == "/budgets":
             return _html(200, views_budget.budgets_page(conn, ctx))
         if path == "/close":

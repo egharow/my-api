@@ -52,3 +52,23 @@ def budgets_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     return layout(conn, ctx, "/budgets", "Budgets",
                   '<h1>Budgets</h1><p class="muted">Set what you want to spend on each category in a month. Overview then shows how much of each is used.</p>'
                   f'<div class="card">{body}</div>')
+
+
+def left_out_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    months = sorted({r[0] for r in conn.execute("SELECT DISTINCT budget_month FROM transactions WHERE left_out = 1")})
+    rows = summary.oneoff_left_out(conn, months) if months else []
+    if not rows:
+        body = ('<div class="card"><p>Nothing is left out. To leave one payment out of the numbers, open its category on Overview, '
+                'click “change category / leave out” on the payment, then “Leave out of the totals”.</p></div>')
+    else:
+        def tr(r):
+            undo = _form(ctx, "/line/leaveout", f'<input type="hidden" name="id" value="{r["id"]}"><input type="hidden" name="on" value="0">'
+                         '<input type="hidden" name="back" value="/leftout"><button class="quiet">Count it again</button>', "inline")
+            d = r["txn_date"]
+            return (f'<tr><td>{esc(d[8:10])}/{esc(d[5:7])}/{esc(d[:4])}</td><td dir="auto">{esc(r["description"])}</td>'
+                    f'<td dir="auto">{esc(r["category"])}</td><td class="n">{money(r["spent"], "ILS", 2)}</td><td>{undo}</td></tr>')
+        trs = "".join(tr(r) for r in rows)
+        body = (f'<div class="card"><p class="muted">{len(rows)} payment(s), {money(sum(r["spent"] for r in rows))} in all. They are in your records but not in any total.</p>'
+                f'<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Payment</th><th>Category</th><th class="n">Amount</th><th></th></tr></thead>'
+                f'<tbody>{trs}</tbody></table></div></div>')
+    return layout(conn, ctx, "/leftout", "Left out", f"<h1>Left out of the numbers</h1>{body}")

@@ -505,3 +505,14 @@ def test_one_click_approves_every_suggestion_and_leaves_the_rest(app, conn):
     assert before - after == suggested
     assert conn.execute("""SELECT COUNT(*) FROM transactions t JOIN categories c ON c.id = t.category_id
                            WHERE t.category_status = 'proposed' AND c.name != 'Uncategorised'""").fetchone()[0] == 0
+
+
+def test_left_out_page_lists_every_month_and_can_bring_a_payment_back(app, conn):
+    from ftracker import summary
+    line = conn.execute("SELECT id FROM transactions WHERE description = 'ONE OFF SERVICE'").fetchone()[0]
+    assert "Nothing is left out" in text(get(app, "/leftout"))
+    post(app, "/line/leaveout", {"id": str(line), "on": "1", "back": "/leftout"})
+    page = text(get(app, "/leftout"))
+    assert "ONE OFF SERVICE" in page and "Count it again" in page
+    res = post(app, "/line/leaveout", {"id": str(line), "on": "0", "back": "/leftout"})
+    assert dict(res.headers)["Location"] == "/leftout" and summary.oneoff_left_out(conn, ["2026-10"]) == []
