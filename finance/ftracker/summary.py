@@ -36,6 +36,7 @@ def set_include_reimbursed(conn: sqlite3.Connection, on: bool) -> None:
 def apply_oneoff(conn: sqlite3.Connection, where: list, args: list) -> None:
     """Leaves out the payments you marked as one-offs (a query on transactions t)."""
     where.append("t.left_out = 0")
+    where.append("NOT (c.name = 'Uncategorised' AND t.amount > 0)")      # money coming in that you have not sorted yet is not a refund
 
 
 def set_left_out(conn: sqlite3.Connection, line_id: int, on: bool) -> None:

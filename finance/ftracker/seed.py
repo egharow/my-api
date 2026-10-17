@@ -98,6 +98,7 @@ BUILTIN_RULES = [
     ("BIT", "Transfer to household", "transfer", None, None, 1, "Bit transfers between household accounts"),
     # Bank statement lines
     ("מאסטרקרד", "Card payment", "card_payment", "out", None, 1, None),
+    ("מאסטרקארד", "Card payment", "card_payment", "out", None, 1, None),     # the same payment, spelled the way the yearly statement prints it
     ("אקספ", "Card payment", "card_payment", "out", None, 1, None),
     ("הבינלאומי", "Card payment", "card_payment", "out", None, 1, None),
     # A member-card top-up with no statement to match: count the payment itself as spending.

@@ -226,3 +226,14 @@ def test_saying_the_same_destination_rule_twice_changes_nothing(conn):
     accounts.set_destination_rule(conn, "העברה דיגיטל", "One Zero")
     accounts.set_destination_rule(conn, "העברה דיגיטל", "One Zero")
     assert conn.execute("SELECT COUNT(*) FROM rules WHERE source = 'user'").fetchone()[0] == 1
+
+
+def test_a_bank_line_read_with_different_wording_in_a_later_statement_is_not_added_twice(home, conn, monkeypatch):
+    from datetime import date
+    from .helpers import bank_file, run_import
+    first = bank_file([(date(2026, 9, 2), "ל.מאסטרקרד)יש(", -4634.73), (date(2026, 9, 15), "פועלים-משכנת-י", -7156.62)])
+    second = bank_file([(date(2026, 9, 2), "ל.מאסטרקארד", -4634.73), (date(2026, 9, 15), "פועלים-משכנת-י", -7156.62),
+                        (date(2026, 9, 20), "חשמל", -300.0)], start=date(2025, 10, 17), end=date(2026, 10, 17))
+    run_import(home, conn, monkeypatch, [("a.pdf", first)])
+    run_import(home, conn, monkeypatch, [("b.pdf", second)])
+    assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 3

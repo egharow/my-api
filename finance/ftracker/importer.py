@@ -121,6 +121,11 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
 
     new = skipped = 0
     for t in st.txns:
+        if st.account_kind == "bank" and t.balance_after is not None and conn.execute(
+                "SELECT 1 FROM transactions WHERE account_id = ? AND txn_date = ? AND amount = ? AND balance_after = ?",
+                (account_id, t.txn_date.isoformat(), t.amount, t.balance_after)).fetchone():
+            skipped += 1                      # the same line read from another statement (the wording can differ a little)
+            continue
         key = _dedupe_key(account_id, st.account_kind, t, st.billing_date)
         # Cards book into the month they are billed; the purchase date is kept alongside.
         month_basis = st.billing_date or t.txn_date

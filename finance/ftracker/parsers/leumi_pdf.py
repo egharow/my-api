@@ -106,7 +106,7 @@ def parse_pages(pages: list[list[dict]]) -> ParsedFile:
                           if w["x1"] <= date_w["x0"] + 1 and not _AMOUNT.match(t)
                           and not _DATE.match(t) and w is not date_w]
             desc_words.sort(key=lambda tw: -tw[1]["x1"])
-            description = " ".join(t for t, _ in desc_words)
+            description = " ".join(t for t, _ in desc_words if t != "₪")
             txns.append(ParsedTxn(
                 txn_date=parse_date(dates[0][0]), description=description,
                 amount=value if is_credit else -value, currency="ILS",
