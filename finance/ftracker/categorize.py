@@ -61,6 +61,7 @@ def _similar_past(conn: sqlite3.Connection, desc: str):
     return best
 
 
+_ONLINE = ("AMAZON", "MAZON", "MKTPL", "ALIEXPRESS", "LIEXPRESS", "TEMU", "SHEIN", "EBAY", "ETSY", "PAYPAL")   # foreign-currency shops that are not travel
 HABIT_MIN = 3                      # approved this many times, always into the same category
 
 
@@ -171,6 +172,12 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
                 category_id, share, n, example = guess
                 confidence = round(min(share, 0.85) * 0.6, 2)
                 basis = f"best guess from {n} payments with similar words, e.g. “{example}”"
+    if (category_id == uncategorised_id(conn) and not rule and t["orig_currency"] not in (None, "ILS")
+            and not any(w in t["description_norm"] for w in _ONLINE)):
+        travel = conn.execute("SELECT id FROM categories WHERE name = 'Travel'").fetchone()
+        if travel:
+            category_id, confidence = travel["id"], 0.3
+            basis = f"paid in {t['orig_currency']}: a trip or online shopping, please check"
     if t["amount"] > 0 and kind == "purchase":
         kind = "refund"
 

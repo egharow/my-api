@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -67,6 +67,10 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action == "resuggest":
+        n = categorize.resuggest(conn)
+        conn.commit()
+        return f"{n} waiting payment(s) got a suggestion"
     if action == "add_rule":
         if e.get("set_kind") or e.get("direction"):
             categorize.add_user_rule(conn, e["pattern"], e["category"], e.get("set_kind"), e.get("direction"))

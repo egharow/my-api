@@ -237,3 +237,22 @@ def test_a_bank_line_read_with_different_wording_in_a_later_statement_is_not_add
     run_import(home, conn, monkeypatch, [("a.pdf", first)])
     run_import(home, conn, monkeypatch, [("b.pdf", second)])
     assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 3
+
+
+def test_travel_category_exists_and_foreign_currency_lines_are_suggested_as_travel(home, conn, monkeypatch):
+    from datetime import date
+    from ftracker.parsers.base import ParsedTxn
+    from .helpers import card_file, run_import
+    assert conn.execute("SELECT 1 FROM categories WHERE name = 'Travel'").fetchone()
+    txns = [ParsedTxn(txn_date=date(2026, 6, 27), description="PHUKET TOUR", amount=-370.0, currency="ILS", orig_amount=-4000.0,
+                      orig_currency="THB", voucher="t1"),
+            ParsedTxn(txn_date=date(2026, 6, 28), description="MKTPL*X AMAZON SEATTLE", amount=-100.0, currency="ILS", orig_amount=-30.0,
+                      orig_currency="USD", voucher="t2"),
+            ParsedTxn(txn_date=date(2026, 6, 29), description="BANGKOK AIRWAYS BOOKING", amount=-1500.0, currency="ILS", orig_amount=-1500.0,
+                      orig_currency="ILS", voucher="t3")]
+    run_import(home, conn, monkeypatch, [("t.xlsx", card_file(last4="3333", txns=txns))])
+    got = {r["voucher"]: (r["name"], r["category_status"]) for r in conn.execute(
+        "SELECT t.voucher, c.name, t.category_status FROM transactions t JOIN categories c ON c.id = t.category_id")}
+    assert got["t1"] == ("Travel", "proposed")                 # foreign currency: a trip or shopping, you confirm
+    assert got["t2"] == ("Online shopping", "proposed")
+    assert got["t3"] == ("Travel", "approved")                 # an airline name is clear on its own
