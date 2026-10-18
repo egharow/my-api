@@ -145,4 +145,4 @@ def wealth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     cards = "".join(_goal_card(g) for g in gp)
     goals_html = (f'<section class="card" style="margin-top:16px"><h2>Goals <small><a href="/goals">edit</a></small></h2>{cards}</section>'
                   if gp else '<section class="card" style="margin-top:16px"><h2>Goals</h2><p class="muted">No goals yet. <a href="/goals">Add one</a>.</p></section>')
-    return layout(conn, ctx, "/wealth", "Wealth", f"<h1>Wealth</h1>{body}{goals_html}")
+    return layout(conn, ctx, "/wealth", "Wealth", f'<h1>Wealth</h1><p><a class="btnlink" href="/simulator">Simulate the future</a></p>{body}{goals_html}')

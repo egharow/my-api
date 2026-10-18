@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, budgets, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_setup, views_trends
+from . import appmode, balances, categorize, budgets, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_setup, views_sim, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -203,6 +203,8 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/simulator":
+            return _html(200, views_sim.simulator_page(conn, ctx))
         if path == "/leftout":
             return _html(200, views_budget.left_out_page(conn, ctx))
         if path == "/budgets":

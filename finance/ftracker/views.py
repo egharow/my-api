@@ -123,6 +123,8 @@ input:not([type=checkbox]):not([type=radio]),select{min-height:34px}
 .bud .fill.over{background:var(--serious)}.bud .mark{position:absolute;top:-4px;width:2px;height:18px;background:var(--ink2)}
 @media (max-width:640px){.bud{grid-template-columns:90px 1fr 100px}h1{font-size:22px}main{padding:12px}}
 /* chart palette */
+.simgrid{display:grid;gap:16px;grid-template-columns:minmax(300px,420px) minmax(0,1fr);align-items:start}@media (max-width:860px){.simgrid{grid-template-columns:1fr}}
+.simrow{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--grid)}.simrow input[type=range]{grid-column:1/3;width:100%;accent-color:var(--ink)}.simrow small{grid-column:1/3}.simnum input[type=number]{width:110px;text-align:right}.simnum label{display:block}.simgrid .trio b{font-size:21px}.simgrid .trio>div{padding:14px 14px}
 .legend a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer}.legend a.off{opacity:.4;text-decoration:line-through}.legend a:hover{text-decoration:underline}
 svg a{cursor:pointer}svg a:hover rect[fill^="var(--c"]{opacity:.82}svg a:focus-visible{outline:2px solid var(--accent)}
 .legend{flex-wrap:wrap;row-gap:4px;column-gap:12px}.legend span{white-space:nowrap}

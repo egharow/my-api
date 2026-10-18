@@ -532,3 +532,11 @@ def test_clicking_the_legend_filters_the_period_charts(app):
     again = [unescape(h) for h in re.findall(r'href="([^"]*)" title="Remove from the filter"', filtered)]
     assert again and "Showing only:" not in text(get(app, again[0]))                                    # removing the last chip clears the filter
     assert 'href="/?p=month&m=' in page                                                                  # the months in the charts open that month
+
+
+def test_the_wealth_simulator_page_has_the_controls_and_is_linked_from_wealth(app):
+    page = text(get(app, "/simulator"))
+    for field in ('id="rate"', 'id="rate_r"', 'id="years"', 'id="years_r"', 'id="tax"', 'id="save"', 'id="fee"', 'id="inf"', 'id="target"', 'id="start"'):
+        assert field in page
+    assert "Tax only the gain above inflation" in page and "simdata" in page
+    assert 'href="/simulator"' in text(get(app, "/wealth"))
