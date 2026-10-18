@@ -516,3 +516,19 @@ def test_left_out_page_lists_every_month_and_can_bring_a_payment_back(app, conn)
     assert "ONE OFF SERVICE" in page and "Count it again" in page
     res = post(app, "/line/leaveout", {"id": str(line), "on": "0", "back": "/leftout"})
     assert dict(res.headers)["Location"] == "/leftout" and summary.oneoff_left_out(conn, ["2026-10"]) == []
+
+
+def test_clicking_the_legend_filters_the_period_charts(app):
+    import re
+    from html import unescape
+    page = text(get(app, "/?p=12"))
+    links = [unescape(h) for h in re.findall(r'href="([^"]*cats=[^"]*)"', page)]
+    assert links, "legend entries should be links"
+    res = get(app, links[0])
+    filtered = text(res)
+    assert res.status == 200 and "Showing only:" in filtered and "Show everything" in filtered
+    assert "Expenses (selected)" in filtered and "What you can actually change" not in filtered      # the fixed/flexible chart is for everything
+    assert "Selected, per month" in filtered
+    again = [unescape(h) for h in re.findall(r'href="([^"]*)" title="Remove from the filter"', filtered)]
+    assert again and "Showing only:" not in text(get(app, again[0]))                                    # removing the last chip clears the filter
+    assert 'href="/?p=month&m=' in page                                                                  # the months in the charts open that month

@@ -123,6 +123,8 @@ input:not([type=checkbox]):not([type=radio]),select{min-height:34px}
 .bud .fill.over{background:var(--serious)}.bud .mark{position:absolute;top:-4px;width:2px;height:18px;background:var(--ink2)}
 @media (max-width:640px){.bud{grid-template-columns:90px 1fr 100px}h1{font-size:22px}main{padding:12px}}
 /* chart palette */
+.legend a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer}.legend a.off{opacity:.4;text-decoration:line-through}.legend a:hover{text-decoration:underline}
+svg a{cursor:pointer}svg a:hover rect[fill^="var(--c"]{opacity:.82}svg a:focus-visible{outline:2px solid var(--accent)}
 .legend{flex-wrap:wrap;row-gap:4px;column-gap:12px}.legend span{white-space:nowrap}
 :root{--c1:#2a78d6;--c2:#eb6834;--c3:#18a999;--c4:#8a5cd6;--c5:#d9a21b;--c6:#d6498e;--cx:#a3a198}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--c1:#3987e5;--c2:#e8743f;--c3:#2bbfae;--c4:#9d75e0;--c5:#e5b53a;--c6:#e063a0;--cx:#6e6d66}}

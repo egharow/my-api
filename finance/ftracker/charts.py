@@ -97,7 +97,8 @@ def line_chart(points: list[tuple[str, float]], currency: str, label: str) -> st
     return "".join(out)
 
 
-def grouped_bars(months: list[str], income: list[float | None], spending: list[float | None], currency: str = "ILS") -> str:
+def grouped_bars(months: list[str], income: list[float | None], spending: list[float | None], currency: str = "ILS",
+                 month_href: list[str] | None = None, spending_label: str = "Expenses") -> str:
     if not months:
         return '<p class="muted">No data yet.</p>'
     W, H, L, R, T, B = 640, 250, 56, 12, 16, 30
@@ -110,7 +111,7 @@ def grouped_bars(months: list[str], income: list[float | None], spending: list[f
     def sy(v):
         return T + (H - T - B) * (1 - v / top)
 
-    out = [_legend([("Income", "--s1"), ("Expenses", "--s2")]),
+    out = [_legend([("Income", "--s1"), (spending_label, "--s2")]),
            f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="Income and spending by month" class="chart">']
     for t in ticks:
         y = sy(t)
@@ -126,7 +127,8 @@ def grouped_bars(months: list[str], income: list[float | None], spending: list[f
             out.append(f'<path d="{_round_top(x, sy(val), bw, base - sy(val))}" fill="var({var})"/>')
         tip = (f"{m}: no data" if income[i] is None and spending[i] is None
                else f"{m}: income {money(income[i], currency)}, spending {money(spending[i], currency)}")
-        out.append(f'<rect x="{gx - gw / 2:.1f}" y="{T}" width="{gw:.1f}" height="{base - T}" fill="transparent" data-tip="{escape(tip)}"/>')
+        hit = f'<rect x="{gx - gw / 2:.1f}" y="{T}" width="{gw:.1f}" height="{base - T}" fill="transparent" data-tip="{escape(tip)}"/>'
+        out.append(f'<a href="{escape(month_href[i])}">{hit}</a>' if month_href else hit)
         if i % step == 0:
             out.append(f'<text x="{gx:.1f}" y="{H - 8}" text-anchor="middle" class="axis">{escape(m[2:])}</text>')
     out.append(f'<line x1="{L}" x2="{W - R}" y1="{base}" y2="{base}" class="baseline"/></svg>')
@@ -235,12 +237,28 @@ def _swatches(names: list[str]) -> str:
     return _legend([(n, _color(i, n)) for i, n in enumerate(names)])
 
 
-def stacked_bars(months: list[str], series: list[tuple[str, list[float]]], currency: str, label: str) -> str:
-    """One column per month, split into parts that add up to the month's total. series: (name, value per month)."""
+def _clickable_legend(items: list[dict]) -> str:
+    """Legend entries that are links. items: name, color, href (or None), on (False dims it)."""
+    out = []
+    for it in items:
+        inner = f'<i style="background:var({it["color"]})"></i>{escape(it["name"])}'
+        if it.get("href"):
+            out.append(f'<a href="{escape(it["href"])}" class="{"" if it.get("on", True) else "off"}" title="Show or hide {escape(it["name"])}">{inner}</a>')
+        else:
+            out.append(f"<span>{inner}</span>")
+    return '<div class="legend">' + "".join(out) + "</div>"
+
+
+def stacked_bars(months: list[str], series: list[tuple], currency: str, label: str,
+                 legend_items: list[dict] | None = None, seg_href=None, month_href: list[str] | None = None) -> str:
+    """One column per month, split into parts that add up to the month's total. series: (name, value per month[, colour variable]).
+
+    legend_items makes the legend clickable; seg_href(name) is where a segment leads; month_href[i] is where a column leads."""
     if not months or not series:
         return '<p class="muted">No data yet.</p>'
     W, H, L, R, T, B = 640, 260, 56, 12, 16, 30
-    totals = [sum(v[i] for _, v in series) for i in range(len(months))]
+    parts_ = [(s[0], s[1], s[2] if len(s) > 2 else _color(i, s[0])) for i, s in enumerate(series)]
+    totals = [sum(v[i] for _, v, _c in parts_) for i in range(len(months))]
     top, ticks = nice_axis(max(totals) or 1)
     n = len(months)
     gw = (W - L - R) / n
@@ -250,7 +268,8 @@ def stacked_bars(months: list[str], series: list[tuple[str, list[float]]], curre
     def sy(v):
         return T + (H - T - B) * (1 - v / top)
 
-    out = [_swatches([nme for nme, _ in series]), f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
+    legend = _clickable_legend(legend_items) if legend_items else _legend([(nme, c) for nme, _v, c in parts_])
+    out = [legend, f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{escape(label)}" class="chart">']
     for t in ticks:
         y = sy(t)
         out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>'
@@ -258,20 +277,24 @@ def stacked_bars(months: list[str], series: list[tuple[str, list[float]]], curre
     step = max(1, math.ceil(n / 8))
     for i, m in enumerate(months):
         gx = L + gw * i + gw / 2
+        mh = month_href[i] if month_href else None
+        col_tip = escape(f"{m}: {money(totals[i], currency)}")
+        rect = (f'<rect x="{gx - gw / 2:.1f}" y="{T}" width="{gw:.1f}" height="{base - T}" fill="transparent" data-tip="{col_tip}"/>')
+        out.append(f'<a href="{escape(mh)}">{rect}</a>' if mh else rect)
         acc = 0.0
-        for k, (name, vals) in enumerate(series):
+        for name, vals, color in parts_:
             v = vals[i]
             if v <= 0:
                 continue
             y1, y0 = sy(acc + v), sy(acc)
-            out.append(f'<rect x="{gx - bw / 2:.1f}" y="{y1:.1f}" width="{bw:.1f}" height="{max(y0 - y1, 0.5):.1f}" fill="var({_color(k, name)})" '
-                       f'stroke="var(--surface)" stroke-width="1"/>')
+            seg = (f'<rect x="{gx - bw / 2:.1f}" y="{y1:.1f}" width="{bw:.1f}" height="{max(y0 - y1, 0.5):.1f}" fill="var({color})" '
+                   f'stroke="var(--surface)" stroke-width="1" data-tip="{escape(f"{m} · {name}: {money(v, currency)} of {money(totals[i], currency)}")}"/>')
+            sh = seg_href(name) if seg_href else None
+            out.append(f'<a href="{escape(sh)}">{seg}</a>' if sh else seg)
             acc += v
-        parts = ", ".join(f"{nme} {money(v[i], currency)}" for nme, v in series if v[i] > 0)
-        out.append(f'<rect x="{gx - gw / 2:.1f}" y="{T}" width="{gw:.1f}" height="{base - T}" fill="transparent" '
-                   f'data-tip="{escape(f"{m}: {money(totals[i], currency)} ({parts})")}"/>')
         if i % step == 0:
-            out.append(f'<text x="{gx:.1f}" y="{H - 8}" text-anchor="middle" class="axis">{escape(m)}</text>')
+            lab = f'<text x="{gx:.1f}" y="{H - 8}" text-anchor="middle" class="axis">{escape(m)}</text>'
+            out.append(f'<a href="{escape(mh)}">{lab}</a>' if mh else lab)
     out.append(f'<line x1="{L}" x2="{W - R}" y1="{base}" y2="{base}" class="baseline"/></svg>')
     return "".join(out)
 

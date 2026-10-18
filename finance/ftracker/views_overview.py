@@ -376,7 +376,25 @@ def _fixed_card(fixed, m) -> str:
     return (f'<div class="card" style="margin-top:14px"><h4 style="margin:0 0 8px">Fixed costs <span class="cap">repeat every month at about the same amount</span></h4>{rows}</div>')
 
 
-def _period_stacks(conn, d, have, owner) -> str:
+def _cats_param(cats: list[str]) -> str:
+    from urllib.parse import quote
+    return quote("|".join(cats), safe="") if cats else ""
+
+
+def _chart_links(base: str, q: dict, cats: list[str], owner) -> dict:
+    """Where a click on a legend entry, a segment, or a month goes. The filter lives in the address (cats=A|B)."""
+    keep = {k: q.get(k) for k in ("p", "end", "from", "to") if q.get(k)}
+
+    def go(new: list[str]) -> str:
+        return base + _qs(**keep, owner=owner, cats=_cats_param(new))
+
+    def toggle(name: str) -> str:
+        return go([c for c in cats if c != name] if name in cats else [*cats, name])
+
+    return {"go": go, "toggle": toggle, "only": lambda name: go([name])}
+
+
+def _period_stacks(conn, d, have, owner, cats, links, base) -> str:
     """Two charts under the income/expense bars: spending split by category, and by fixed or flexible."""
     if len(have) < 2:
         return ""
@@ -385,23 +403,33 @@ def _period_stacks(conn, d, have, owner) -> str:
         for c, v in d["spend"].get(x, {}).items():
             totals[c] = totals.get(c, 0) + v
     top = sorted(totals, key=lambda c: -totals[c])[:6]
-    series = [(c, [d["spend"].get(x, {}).get(c, 0.0) for x in have]) for c in top]
+    full = [(c, [d["spend"].get(x, {}).get(c, 0.0) for x in have], f"--c{i % 6 + 1}") for i, c in enumerate(top)]
     rest = [round(sum(v for c, v in d["spend"].get(x, {}).items() if c not in top), 2) for x in have]
     if any(rest):
-        series.append((charts.OTHER, rest))
+        full.append((charts.OTHER, rest, "--cx"))
+    series = [s for s in full if s[0] in cats] if cats else full
+    legend = [{"name": n, "color": col, "on": (not cats) or n in cats,
+               "href": None if n == charts.OTHER else links["toggle"](n)} for n, _v, col in full]
     labels = [short_label(x) for x in have]
-    cat_html = charts.stacked_bars(labels, series, "ILS", "Spending by category, month by month")
+    month_href = [base + _qs(p="month", m=x, owner=owner) for x in have]
+    cat_html = charts.stacked_bars(labels, series, "ILS", "Spending by category, month by month", legend_items=legend,
+                                   seg_href=lambda name: None if name == charts.OTHER else links["only"](name), month_href=month_href)
+    table = charts.data_table(["Month", *[n for n, _v, _c in series]], [[labels[i], *[f"{v[i]:,.0f}" for _n, v, _c in series]] for i in range(len(have))],
+                              "Spending by category and month")
+    hint = '<p class="cap" style="margin:0 0 4px">Click a name to show or hide it, a coloured block to show only that category, or a month to open it.</p>'
+    out = f'<h4 style="margin:18px 0 4px">Where it went, month by month</h4>{hint}{cat_html}{table}'
+    if cats:
+        return out
     fixed = []
     for x in have:
         f = insights.fixed_costs(conn, x, d["months"], owner)
         fixed.append(min(round(sum(i["this"] or 0 for i in f), 2), d["exp_tot"].get(x, 0.0)))
     flex = [round(max(d["exp_tot"].get(x, 0.0) - f, 0.0), 2) for x, f in zip(have, fixed)]
-    fix_html = charts.stacked_bars(labels, [("Fixed (mortgage, loans, regular bills)", fixed), ("Everything else", flex)], "ILS", "Fixed and flexible spending")
+    fix_html = charts.stacked_bars(labels, [("Fixed (mortgage, loans, regular bills)", fixed), ("Everything else", flex)], "ILS", "Fixed and flexible spending",
+                                   month_href=month_href)
     share = sum(flex) / (sum(flex) + sum(fixed) or 1) * 100
-    return (f'<h4 style="margin:18px 0 4px">Where it went, month by month</h4>{cat_html}'
-            + charts.data_table(["Month", *[n for n, _ in series]], [[labels[i], *[f"{v[i]:,.0f}" for _, v in series]] for i in range(len(have))], "Spending by category and month")
-            + f'<h4 style="margin:18px 0 4px">What you can actually change</h4><p class="cap" style="margin:0 0 6px">About {share:.0f}% of your spending is flexible. '
-              f'Fixed costs are the ones that repeat every month at about the same amount.</p>{fix_html}')
+    return (out + f'<h4 style="margin:18px 0 4px">What you can actually change</h4><p class="cap" style="margin:0 0 6px">About {share:.0f}% of your spending is flexible. '
+                  f'Fixed costs are the ones that repeat every month at about the same amount.</p>{fix_html}')
 
 
 def _budget_period(conn, ctx, cat_tot, n, owner) -> str:
@@ -416,17 +444,6 @@ def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:
     if not have:
         return '<div class="card"><p>No data in this period.</p></div>'
     n = len(have)
-    avg_inc = sum(d["inc_tot"].get(x, 0) for x in have) / n
-    avg_exp = sum(d["exp_tot"].get(x, 0) for x in have) / n
-    avg_inv = sum(d["inv"].get(x, 0) for x in have) / n
-    skipped = [x for x in months_between(win[0], win[-1]) if x not in d["months"]] if win else []
-    note = (f'<p class="cap" style="margin:4px 0 10px">Based on the {n} month(s) with data: {", ".join(short_label(x) for x in have)}. '
-            + (f'{", ".join(short_label(x) for x in skipped)} {"has" if len(skipped) == 1 else "have"} no data, so '
-               f'{"it is" if len(skipped) == 1 else "they are"} left out instead of counted as zero.' if skipped else "") + "</p>")
-    chart = (charts.grouped_bars(have, [d["inc_tot"].get(x) for x in have], [d["exp_tot"].get(x) for x in have])
-             + charts.data_table(["Month", "Income", "Expenses", "Kept"], [[short_label(x), f'{d["inc_tot"].get(x, 0):,.0f}', f'{d["exp_tot"].get(x, 0):,.0f}',
-                                                                       f'{d["inc_tot"].get(x, 0) - d["exp_tot"].get(x, 0):,.0f}'] for x in have], "Income and expenses by month"))
-    chart += _period_stacks(conn, d, have, owner)
     cat_tot: dict[str, float] = {}
     cat_hi: dict[str, tuple[str, float]] = {}
     for x in have:
@@ -434,20 +451,52 @@ def _period_view(conn, ctx, d, win, owner, base, mode, q) -> str:
             cat_tot[c] = cat_tot.get(c, 0) + v
             if v > cat_hi.get(c, ("", 0))[1]:
                 cat_hi[c] = (x, v)
-    ranked = sorted(cat_tot, key=lambda c: -cat_tot[c])
-    top = cat_tot[ranked[0]] / n if ranked else 1
+    cats = [c for c in (q.get("cats") or "").split("|") if c in cat_tot]          # the categories you clicked
+    links = _chart_links(base, q, cats, owner)
+    avg_inc = sum(d["inc_tot"].get(x, 0) for x in have) / n
+    avg_inv = sum(d["inv"].get(x, 0) for x in have) / n
+    exp_by = {x: (sum(d["spend"].get(x, {}).get(c, 0) for c in cats) if cats else d["exp_tot"].get(x, 0)) for x in have}
+    avg_exp = sum(exp_by.values()) / n
+    skipped = [x for x in months_between(win[0], win[-1]) if x not in d["months"]] if win else []
+    note = (f'<p class="cap" style="margin:4px 0 10px">Based on the {n} month(s) with data: {", ".join(short_label(x) for x in have)}. '
+            + (f'{", ".join(short_label(x) for x in skipped)} {"has" if len(skipped) == 1 else "have"} no data, so '
+               f'{"it is" if len(skipped) == 1 else "they are"} left out instead of counted as zero.' if skipped else "") + "</p>")
+    month_href = [base + _qs(p="month", m=x, owner=owner) for x in have]
+    chips = ""
+    if cats:
+        chips = ('<p style="margin:6px 0 10px"><b>Showing only:</b> '
+                 + " ".join(f'<a class="chip" href="{esc(links["toggle"](c))}" title="Remove from the filter">{esc(c)} ✕</a>' for c in cats)
+                 + f' <a class="cap" href="{esc(links["go"]([]))}">Show everything</a></p>')
+    chart = (charts.grouped_bars(have, [d["inc_tot"].get(x) for x in have], [exp_by[x] for x in have], month_href=month_href,
+                                 spending_label="Expenses (selected)" if cats else "Expenses")
+             + charts.data_table(["Month", "Income", "Expenses", "Kept"], [[short_label(x), f'{d["inc_tot"].get(x, 0):,.0f}', f'{exp_by[x]:,.0f}',
+                                                                       f'{d["inc_tot"].get(x, 0) - exp_by[x]:,.0f}'] for x in have], "Income and expenses by month"))
+    chart += _period_stacks(conn, d, have, owner, cats, links, base)
+    shown = [c for c in sorted(cat_tot, key=lambda c: -cat_tot[c]) if not cats or c in cats]
+    top = cat_tot[shown[0]] / n if shown else 1
+    all_total = sum(cat_tot.values()) or 1
+    sel_total = sum(cat_tot[c] for c in shown)
     rows = []
-    for c in ranked:
+    for c in shown:
         per = "".join(f'<div><span>{esc(month_label(x))}</span><span></span><span class="n">{money(d["spend"].get(x, {}).get(c, 0))}</span>'
                       f'<span><a href="{base}{_qs(p="month", m=x, open=c, owner=owner)}">see the payments</a></span></div>' for x in have)
         hi = cat_hi.get(c)
         rows.append(f'<details class="cat"><summary><span class="tw">›</span><span dir="auto">{esc(c)}</span>'
-                    f'<span class="share hidem"><span class="t"><span style="width:{cat_tot[c] / n / top * 100:.0f}%"></span></span><em>{cat_tot[c] / (sum(cat_tot.values()) or 1) * 100:.0f}%</em></span>'
+                    f'<span class="share hidem"><span class="t"><span style="width:{cat_tot[c] / n / top * 100:.0f}%"></span></span><em>{cat_tot[c] / all_total * 100:.0f}%</em></span>'
                     f'<span class="n"><b>{money(cat_tot[c] / n)}</b></span><span class="n cap hidem">{esc(short_label(hi[0]) + " · " + money(hi[1])) if hi else ""}</span></summary>'
                     f'<div class="lines">{per}</div></details>')
     head = (f'<div class="cat head"><span></span><span>Category</span><span class="hidem">Share</span><span class="n">Average / month</span>'
             f'<span class="n hidem">Highest month</span></div>')
-    foot = f'<div class="cat foot"><span></span><span>Total</span><span class="hidem"></span><span class="n">{money(sum(cat_tot.values()) / n)}</span><span class="n cap hidem">{money(sum(cat_tot.values()))} over {n} months</span></div>'
-    return (_tiles(avg_inc, avg_exp, avg_inv, "Average ").replace("Average Income", "Average income / month").replace("Average Expenses", "Average expenses / month").replace("Average Kept", "Average kept / month")
-            + note + f'<div class="card" style="margin-top:6px">{chart}</div>{_budget_period(conn, ctx, cat_tot, n, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Average per category</h3>'
-            f'<div class="cats">{head}{"".join(rows)}{foot}</div>')
+    foot = f'<div class="cat foot"><span></span><span>Total</span><span class="hidem"></span><span class="n">{money(sel_total / n)}</span><span class="n cap hidem">{money(sel_total)} over {n} months</span></div>'
+    if cats:
+        tiles = ('<div class="trio">'
+                 f'<div><small>Selected, per month</small><b>{money(avg_exp)}</b></div>'
+                 f'<div><small>All expenses, per month</small><b>{money(sum(d["exp_tot"].get(x, 0) for x in have) / n)}</b></div>'
+                 f'<div><small>Share of all expenses</small><b>{sel_total / all_total * 100:.0f}%</b></div></div>')
+        budget = ""
+    else:
+        tiles = (_tiles(avg_inc, avg_exp, avg_inv, "Average ").replace("Average Income", "Average income / month").replace("Average Expenses", "Average expenses / month")
+                 .replace("Average Kept", "Average kept / month"))
+        budget = _budget_period(conn, ctx, cat_tot, n, owner)
+    return (tiles + note + chips + f'<div class="card" style="margin-top:6px">{chart}</div>{budget}'
+            f'<h3 style="margin:18px 0 6px;font-size:16px">Average per category</h3><div class="cats">{head}{"".join(rows)}{foot}</div>')
