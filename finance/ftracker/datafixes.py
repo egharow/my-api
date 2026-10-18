@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -67,6 +67,18 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action == "move_merchant":
+        from .normalize import norm_description
+        pat = f"%{norm_description(e['pattern'])}%"
+        cat = conn.execute("SELECT id FROM categories WHERE name = ?", (e["category"],)).fetchone()
+        if not cat:
+            return f"skipped: no category called {e['category']}"
+        ids = [r[0] for r in conn.execute(
+            """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id
+               WHERE t.description_norm LIKE ? AND t.category_id != ? AND b.status != 'committed'""", (pat, cat["id"]))]
+        if ids:
+            categorize.approve(conn, ids, e["category"], learn=False)
+        return f"{len(ids)} payment(s) of {e['pattern']} moved to {e['category']}"
     if action == "propose_rule":
         from .normalize import norm_description
         cat = conn.execute("SELECT id FROM categories WHERE name = ?", (e["category"],)).fetchone()

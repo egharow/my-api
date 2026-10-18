@@ -169,3 +169,16 @@ def test_a_suggestion_rule_proposes_but_does_not_approve(conn, home, tmp_path, m
     datafixes.apply(conn, home, app, date(2026, 10, 18))
     row = conn.execute("SELECT c.name, t.category_status FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.voucher = 'p1'").fetchone()
     assert (row[0], row[1]) == ("Miscellaneous", "proposed")
+
+
+def test_a_merchant_can_be_moved_to_a_new_category_everywhere_it_is_still_open(conn, home, tmp_path, monkeypatch):
+    from .helpers import card_file, card_txn, run_import
+    run_import(home, conn, monkeypatch, [("c.xlsx", card_file(last4="5555", txns=[card_txn(date(2026, 9, 3), "רכבת ישראל באר", 12.0, "r1"),
+                                                                                 card_txn(date(2026, 9, 4), "רכבת ישראל תל", 14.0, "r2")]))])
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([
+        {"id": "a", "action": "add_category", "name": "Public transportation", "kind": "expense"},
+        {"id": "b", "action": "move_merchant", "pattern": "רכבת ישראל", "category": "Public transportation"}]), encoding="utf-8")
+    lines = datafixes.apply(conn, home, app, date(2026, 10, 18))
+    assert "2 payment(s)" in lines[1]
+    assert {r[0] for r in conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.voucher IN ('r1','r2')")} == {"Public transportation"}
