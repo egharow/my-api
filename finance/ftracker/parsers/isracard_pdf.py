@@ -111,10 +111,12 @@ def parse_pages(pages: list[list[dict]]) -> ParsedFile:
                 totals.append(_num(nums[-1]))
     if not totals:
         raise ParseError("statement total row not found")
-    st = ParsedStatement(issuer="isracard", account_kind="card", last4=last4, product="Isracard", billing_date=billing,
+    amex = any(fix_word(w["text"]) == "אמריקן" for w in first)       # American Express statements share Isracard's layout
+    issuer = "amex" if amex else "isracard"
+    st = ParsedStatement(issuer=issuer, account_kind="card", last4=last4, product="American Express" if amex else "Isracard", billing_date=billing,
                          period_start=None, period_end=None, stated_total=round(sum(totals), 2), currency="ILS",
                          txns=txns, holder_text=" ".join(holder))
-    return ParsedFile("isracard", "card_export", [st])
+    return ParsedFile(issuer, "card_export", [st])
 
 
 def _row(date_word: dict, band: list[dict], seen: dict) -> ParsedTxn | None:
@@ -127,7 +129,7 @@ def _row(date_word: dict, band: list[dict], seen: dict) -> ParsedTxn | None:
         orig = next((_num(t) for t, x in nums if 355 <= x <= 380 and x > 340), None)
         if orig is None:
             orig = next((_num(t) for t, x in nums if 320 <= x <= 380), charge_fx)
-        label = next((t for t, x in rest if 372 <= x <= 380 and not _NUM.match(t)), "")
+        label = next((t for t, x in rest if 368 <= x <= 380 and not _NUM.match(t)), "")
         cur = {"$": "USD", "₪": "ILS", "€": "EUR", "£": "GBP"}.get(label, label if re.fullmatch(r"[A-Z]{3}", label or "") else "ILS")
         rate = next((t for t, x in rest if re.fullmatch(r"\d\.\d{4}", t)), None)
         merchant = " ".join(t for t, x in rest if x >= FX_MERCHANT_MIN_X and not _NUM.match(t) and t not in ("$", "₪") and not _DATE.match(t))

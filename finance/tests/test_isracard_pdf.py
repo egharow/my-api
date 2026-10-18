@@ -56,3 +56,14 @@ def test_identical_lines_on_one_day_stay_separate():
 
 def test_other_pdfs_are_not_mistaken_for_it():
     assert not ip.looks_like([[w(H("חשבון"), 500, 10), w(H("חובה"), 400, 10)]])
+
+
+def test_an_american_express_statement_in_isracards_layout_is_filed_under_amex(monkeypatch):
+    from ftracker.parsers import isracard_pdf as m
+
+    def word(text, x=100.0, top=10.0):
+        return {"text": text[::-1], "x0": x, "x1": x + 20, "top": top}        # stored back to front, as the PDF does
+    page = [word("*8542*"), word("אמריקן", 50, 20), word("אקספרס", 80, 20)]
+    monkeypatch.setattr(m, "_LAST4", m._LAST4)
+    fixed = [m.fix_word(w["text"]) for w in page]
+    assert "אמריקן" in fixed and any(m._LAST4.match(f) for f in fixed)
