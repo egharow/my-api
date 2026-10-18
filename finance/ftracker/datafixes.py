@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -67,6 +67,16 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action == "propose_rule":
+        from .normalize import norm_description
+        cat = conn.execute("SELECT id FROM categories WHERE name = ?", (e["category"],)).fetchone()
+        if not cat:
+            return f"skipped: no category called {e['category']}"
+        pat = norm_description(e["pattern"])
+        conn.execute("INSERT INTO rules (source, pattern, category_id, auto_approve, priority, created_at) VALUES ('builtin', ?, ?, 0, ?, ?)",
+                     (pat, cat["id"], len(pat), date.today().isoformat()))
+        categorize.apply_rules_to_proposed(conn)
+        return f"suggestion rule added: {e['pattern']} -> {e['category']}"
     if action == "resuggest":
         n = categorize.resuggest(conn)
         conn.commit()

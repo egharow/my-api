@@ -159,3 +159,13 @@ def test_a_payment_moved_out_of_a_transfer_category_becomes_an_ordinary_expense(
     assert (row["name"], row["kind"]) == ("Car", "purchase")
     from ftracker import summary
     assert dict((r["category"], r["spent"]) for r in summary.spending_by_category(conn, "2026-08"))["Car"] == 42000.0
+
+
+def test_a_suggestion_rule_proposes_but_does_not_approve(conn, home, tmp_path, monkeypatch):
+    from .helpers import card_file, card_txn, run_import
+    run_import(home, conn, monkeypatch, [("c.xlsx", card_file(last4="4444", txns=[card_txn(date(2026, 9, 3), "AMAZON MKTPL X", 50.0, "p1")]))])
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([{"id": "p", "action": "propose_rule", "pattern": "AMAZON", "category": "Miscellaneous"}]), encoding="utf-8")
+    datafixes.apply(conn, home, app, date(2026, 10, 18))
+    row = conn.execute("SELECT c.name, t.category_status FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.voucher = 'p1'").fetchone()
+    assert (row[0], row[1]) == ("Miscellaneous", "proposed")
