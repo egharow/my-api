@@ -254,5 +254,6 @@ def test_travel_category_exists_and_foreign_currency_lines_are_suggested_as_trav
     got = {r["voucher"]: (r["name"], r["category_status"]) for r in conn.execute(
         "SELECT t.voucher, c.name, t.category_status FROM transactions t JOIN categories c ON c.id = t.category_id")}
     assert got["t1"] == ("Travel", "proposed")                 # foreign currency: a trip or shopping, you confirm
-    assert got["t2"] == ("Online shopping", "proposed")
+    assert got["t2"] == ("Uncategorised", "proposed")          # a marketplace: you pick by what it was (clothes, home...)
+    assert not conn.execute("SELECT 1 FROM categories WHERE name = 'Online shopping'").fetchone()
     assert got["t3"] == ("Travel", "approved")                 # an airline name is clear on its own
