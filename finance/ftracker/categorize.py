@@ -282,8 +282,8 @@ def _ensure_editable(conn: sqlite3.Connection, txn_ids: list[int]) -> None:
         return
     marks = ",".join("?" * len(txn_ids))
     row = conn.execute(
-        f"""SELECT COUNT(*) FROM transactions t JOIN batches b ON b.id = t.batch_id
-            WHERE t.id IN ({marks}) AND b.status = 'committed'""", txn_ids).fetchone()
+        f"""SELECT COUNT(*) FROM transactions t JOIN batches b ON b.id = t.batch_id JOIN accounts a ON a.id = t.account_id
+            WHERE t.id IN ({marks}) AND b.status = 'committed' AND a.issuer != 'cash'""", txn_ids).fetchone()
     if row[0]:
         raise PermissionError("these transactions belong to a committed import; reopen it first")
 

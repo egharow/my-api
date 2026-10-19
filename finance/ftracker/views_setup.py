@@ -157,7 +157,7 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                + _form(ctx, "/setup/owner", '<input name="name" placeholder="New person (for example Shir)" required> <button class="quiet">Add person</button>', "row") + "</section>")
 
     accts = conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a LEFT JOIN owners o ON o.id = a.owner_id
-                            WHERE a.issuer != 'sheet' AND a.active = 1 AND (a.closed_on IS NULL OR a.closed_on > ?)
+                            WHERE a.issuer NOT IN ('sheet','cash') AND a.active = 1 AND (a.closed_on IS NULL OR a.closed_on > ?)
                             ORDER BY a.kind, a.label""", (ctx.today,)).fetchall()
     arows = ""
     for a in accts:
@@ -209,7 +209,7 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                + f'<details style="margin-top:12px"><summary>All categories ({len(cc)})</summary>'
                + charts.scroll(f'<table><thead><tr><th>Category</th><th>Type</th><th class="n">Lines</th></tr></thead><tbody>{cat_rows}</tbody></table>') + "</details></section>")
     cards = conn.execute("""SELECT a.id, a.label, a.pays_from_account_id, a.pays_externally, o.name AS owner FROM accounts a
-                            LEFT JOIN owners o ON o.id = a.owner_id WHERE a.kind = 'card' AND a.active = 1 AND a.issuer != 'sheet'
+                            LEFT JOIN owners o ON o.id = a.owner_id WHERE a.kind = 'card' AND a.active = 1 AND a.issuer NOT IN ('sheet','cash')
                             ORDER BY o.name, a.label""").fetchall()
     payers = conn.execute("SELECT id, label FROM accounts WHERE kind IN ('bank','savings') AND active = 1 ORDER BY label").fetchall()
     if cards:

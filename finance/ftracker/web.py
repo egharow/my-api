@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import appmode, balances, categorize, budgets, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_setup, views_sim, views_trends
+from . import alerts, appmode, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_recurring, views_setup, views_sim, views_trips, views_year, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -127,7 +127,7 @@ class App:
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
                             data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS,
-                            readonly=remote and self.phone, closed=frozenset(closing.closed_months(conn)))
+                            readonly=remote and self.phone, closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)))
             ph = conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone()
             if ph and conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone():
                 ip = appmode.lan_address()
@@ -203,6 +203,18 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/year":
+            return _html(200, views_year.year_page(conn, ctx, q))
+        if path == "/recurring":
+            return _html(200, views_recurring.recurring_page(conn, ctx))
+        if path == "/alerts":
+            return _html(200, views_recurring.alerts_page(conn, ctx))
+        if path == "/trips":
+            return _html(200, views_trips.trips_page(conn, ctx))
+        if path.startswith("/trip/") and path[6:].isdigit():
+            return _html(200, views_trips.trip_page(conn, ctx, int(path[6:]), q))
+        if path == "/cash":
+            return _html(200, views_trips.cash_page(conn, ctx))
         if path == "/simulator":
             return _html(200, views_sim.simulator_page(conn, ctx))
         if path == "/leftout":
@@ -551,6 +563,43 @@ class App:
             if path == "/watch/check":
                 note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
                 return self._redirect("/upload", note or "Nothing new in the folder.")
+            if path == "/alerts/dismiss":
+                alerts.dismiss(conn, form.get("id", ""))
+                return self._redirect("/alerts", "Dismissed")
+            if path == "/trips/new":
+                try:
+                    tid = trips.create(conn, form.get("name", ""), form.get("kind", "tag"), form.get("start") or None, form.get("end") or None)
+                except ValueError as exc:
+                    return self._redirect("/trips", str(exc), err=True)
+                return self._redirect(f"/trip/{tid}", "Added")
+            if path == "/trip/delete":
+                trips.delete(conn, int(form.get("tag", 0)))
+                return self._redirect("/trips", "Deleted")
+            if path == "/trip/add":
+                n = trips.attach(conn, int(form["tag"]), [int(x) for x in multi.get("line", []) if x.isdigit()])
+                return self._redirect(f"/trip/{form['tag']}", f"{n} payment(s) added")
+            if path == "/trip/remove":
+                trips.detach(conn, int(form["tag"]), int(form["id"]))
+                return self._redirect(f"/trip/{form['tag']}", "Taken out")
+            if path == "/tag/add-line":
+                if form.get("tag", "").isdigit() and form.get("id", "").isdigit():
+                    trips.attach(conn, int(form["tag"]), [int(form["id"])])
+                    back = form.get("back", "/")
+                    back = back if back.startswith("/") and not back.startswith("//") and "://" not in back and "\n" not in back else "/"
+                    return self._redirect(back, "Added to the trip")
+                return self._redirect("/", "Choose a trip or tag first.", err=True)
+            if path == "/cash/add":
+                back = form.get("back", "/cash")
+                back = back if back.startswith("/") and not back.startswith("//") and "://" not in back and "\n" not in back else "/cash"
+                try:
+                    cash.add(conn, form.get("when", ""), float((form.get("amount") or "0").replace(",", "")), form.get("description", ""),
+                             form.get("category", ""), [int(form["tag"])] if form.get("tag", "").isdigit() else [])
+                except ValueError as exc:
+                    return self._redirect(back, str(exc), err=True)
+                return self._redirect(back, "Payment added")
+            if path == "/cash/delete":
+                cash.delete(conn, int(form.get("id", 0)))
+                return self._redirect("/cash", "Deleted")
             if path == "/budgets/save":
                 amounts: dict[str, float] = {}
                 for cat, amt in zip(multi.get("cat", []), multi.get("amt", [])):
@@ -642,7 +691,11 @@ class App:
                 goals.add_goal(conn, form["name"].strip(), float(form["amount"].replace(",", "")), form.get("currency", "ILS"),
                                form.get("by") or None, int(form["age"]) if form.get("age") else None, form.get("owner") or None,
                                [int(a) for a in multi.get("account", [])], float(form.get("return") or 0) / 100)
-                return self._redirect("/goals", "Goal added")
+                return self._redirect("/wealth" if form.get("back") == "/wealth" else "/goals", "Goal added")
+            if path == "/goals/remove":
+                conn.execute("UPDATE goals SET active = 0 WHERE id = ?", (int(form.get("id", 0)),))
+                conn.commit()
+                return self._redirect("/wealth", "Goal removed")
             if path == "/birth":
                 goals.set_birth_date(conn, form["owner"], form["birth"])
                 return self._redirect("/goals", "Birth date saved")

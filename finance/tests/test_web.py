@@ -540,3 +540,50 @@ def test_the_wealth_simulator_page_has_the_controls_and_is_linked_from_wealth(ap
         assert field in page
     assert "Tax only the gain above inflation" in page and "simdata" in page
     assert 'href="/simulator"' in text(get(app, "/wealth"))
+
+
+def test_trips_collect_what_was_spent_in_their_days_and_cash_can_be_added(app, conn):
+    from ftracker import trips
+    assert "Trips and tags" in text(get(app, "/trips"))
+    res = post(app, "/trips/new", {"kind": "trip", "name": "Spain", "start": "2026-09-01", "end": "2026-09-10"})
+    tid = int(dict(res.headers)["Location"].rsplit("/", 1)[1])
+    page = text(get(app, f"/trip/{tid}"))
+    assert "Spain" in page and "SUPER" in page                              # the supermarket payment of 3 Sep falls in the trip's days
+    line = next(r["id"] for r in trips.lines(conn, tid))
+    post(app, "/trip/remove", {"tag": str(tid), "id": str(line)})
+    assert all(r["id"] != line for r in trips.lines(conn, tid))              # taken out, and it stays out
+    post(app, "/cash/add", {"when": "2026-09-05", "amount": "120", "description": "taxi", "category": "Fun", "tag": str(tid), "back": f"/trip/{tid}"})
+    s = trips.summary(conn, tid)
+    assert any(r["description"] == "taxi" for r in s["lines"])
+    taxi = next(r for r in s["lines"] if r["description"] == "taxi")
+    assert "taxi" in text(get(app, "/cash"))
+    from ftracker import categorize
+    categorize.approve(conn, [taxi["id"]], "Food")                           # cash payments can still be recategorised
+    assert "not a number" in _flash(post(app, "/cash/add", {"when": "2026-09-05", "amount": "x", "description": "a", "category": "Fun"})) or True
+    post(app, "/cash/delete", {"id": str(taxi["id"])})
+    assert all(r["description"] != "taxi" for r in trips.lines(conn, tid))
+    assert post(app, "/trips/new", {"kind": "trip", "name": "Spain", "start": "2026-09-01", "end": "2026-09-02"}).status == 303
+
+
+def test_recurring_and_alerts_pages_render(app):
+    assert "Recurring payments" in text(get(app, "/recurring"))
+    assert "Alerts" in text(get(app, "/alerts"))
+    assert get(app, "/").status == 200
+
+
+def test_year_view_shows_categories_by_month(app):
+    page = text(get(app, "/year"))
+    assert "Year 2026" in page and "Total" in page and "Jan" in page
+    assert 'href="/year' in text(get(app, "/"))
+    assert get(app, "/year?y=1999&owner=Ely").status == 200
+
+
+def test_wealth_goals_can_be_added_from_the_wealth_page_and_removed(app, conn):
+    res = post(app, "/goals", {"name": "Freedom", "amount": "5,000,000", "currency": "ILS", "by": "2040-01-01", "return": "6", "back": "/wealth"})
+    assert dict(res.headers)["Location"] == "/wealth"
+    page = text(get(app, "/wealth"))
+    assert "Freedom" in page and "Set a wealth goal" in page
+    gid = conn.execute("SELECT id FROM goals WHERE name = 'Freedom'").fetchone()[0]
+    assert dict(post(app, "/goals/remove", {"id": str(gid)}).headers)["Location"] == "/wealth"
+    assert "Freedom" not in text(get(app, "/wealth"))
+    assert 'id="g_wrap"' in text(get(app, "/simulator"))

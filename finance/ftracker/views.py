@@ -28,6 +28,7 @@ class Ctx:
     phone_pin: str = ""
     phone_anywhere: str = ""
     closed: frozenset = frozenset()  # months you closed
+    tags: tuple = ()                 # (id, name) of your trips and tags
 
 
 CSS = """
@@ -125,6 +126,9 @@ input:not([type=checkbox]):not([type=radio]),select{min-height:34px}
 /* chart palette */
 .simgrid{display:grid;gap:16px;grid-template-columns:minmax(300px,420px) minmax(0,1fr);align-items:start}@media (max-width:860px){.simgrid{grid-template-columns:1fr}}
 .simrow{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--grid)}.simrow input[type=range]{grid-column:1/3;width:100%;accent-color:var(--ink)}.simrow small{grid-column:1/3}.simnum input[type=number]{width:110px;text-align:right}.simnum label{display:block}.simgrid .trio b{font-size:21px}.simgrid .trio>div{padding:14px 14px}
+.tripgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.tripcard{display:flex;flex-direction:column;gap:2px;text-decoration:none;color:var(--ink)}.tripcard:hover{border-color:var(--ink)}.tripamt{font-family:var(--num);font-size:22px;font-weight:600;margin-top:6px}
+.alert{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:start;padding:8px 0;border-top:1px dashed var(--grid)}.alert:first-of-type{border-top:0}.alert .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;background:var(--axis)}.alert.warning .dot{background:var(--warning)}
+.yeartable{font-size:13px}.yeartable th,.yeartable td{padding:5px 6px;white-space:nowrap}.yeartable td.heat a{color:var(--ink);text-decoration:none}.yeartable tr.tot td{border-top:2px solid var(--rule)}
 .legend a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer}.legend a.off{opacity:.4;text-decoration:line-through}.legend a:hover{text-decoration:underline}
 svg a{cursor:pointer}svg a:hover rect[fill^="var(--c"]{opacity:.82}svg a:focus-visible{outline:2px solid var(--accent)}
 .legend{flex-wrap:wrap;row-gap:4px;column-gap:12px}.legend span{white-space:nowrap}
@@ -265,7 +269,7 @@ document.addEventListener('mousemove',function(e){t.style.left=Math.min(e.client
 document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))t.style.display='none'});})();
 """
 
-NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/wealth", "Wealth"), ("/setup", "Settings")]
+NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/recurring", "Recurring"), ("/wealth", "Wealth"), ("/trips", "Trips"), ("/setup", "Settings")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:
@@ -629,7 +633,7 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     rows, folded_rows = [], []
     accts = conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
                             LEFT JOIN owners o ON o.id = a.owner_id
-                            WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' AND (a.closed_on IS NULL OR a.closed_on > ?)
+                            WHERE a.active = 1 AND a.kind != 'card' AND a.issuer NOT IN ('sheet','cash') AND (a.closed_on IS NULL OR a.closed_on > ?)
                             ORDER BY a.sort_order, a.kind, a.label""", (ctx.today,)).fetchall()
     latest = {r["account_id"]: r for r in balances.latest(conn, ctx.today)}
     fold = balances.fold_count(conn)
@@ -709,7 +713,7 @@ def goals_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     gp = goals.all_progress(conn, ctx.today)
     cards = "".join(_goal_card(g) for g in gp) or '<p class="muted">No goals yet. Add one below.</p>'
     acct_opts = "".join(f'<label style="display:block"><input type="checkbox" name="account" value="{a["id"]}"> {esc(a["label"])}</label>'
-                        for a in conn.execute("SELECT id, label FROM accounts WHERE kind NOT IN ('card') AND issuer != 'sheet' ORDER BY label"))
+                        for a in conn.execute("SELECT id, label FROM accounts WHERE kind NOT IN ('card') AND issuer NOT IN ('sheet','cash') ORDER BY label"))
     owner_opts = '<option value="">Household</option>' + "".join(f"<option>{esc(o)}</option>" for o in ctx.owners)
     birth = "".join(
         _form(ctx, "/birth", f'<input type="hidden" name="owner" value="{esc(o["name"])}">{esc(o["name"])}: '

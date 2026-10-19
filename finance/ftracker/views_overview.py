@@ -10,6 +10,7 @@ from html import escape as esc
 from . import balances, budgets, charts, closing, expected, insights, summary
 from .charts import money
 from .views_budget import budget_card
+from .views_recurring import alerts_card
 from .views import Ctx, _form, counts, dmy, layout
 
 MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -87,6 +88,9 @@ def _change_form(ctx: Ctx, line_id, cats: str, back: str, month: str | None = No
             + _form(ctx, "/line/leaveout", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="on" value="1">'
                     f'<input type="hidden" name="back" value="{esc(back)}">{ok}<button class="quiet" title="A one-off, like a car or a trip. It stays in your records but not in the totals.">'
                     'Leave out of the totals</button>', "row")
+            + (_form(ctx, "/tag/add-line", f'<input type="hidden" name="id" value="{line_id}"><input type="hidden" name="back" value="{esc(back)}">'
+                     '<select name="tag" required><option value="" disabled selected>add to a trip or tag…</option>'
+                     + "".join(f'<option value="{i}">{esc(n)}</option>' for i, n in ctx.tags) + '</select> <button class="quiet">Add</button>', "row") if ctx.tags else "")
             + "</details>")
 
 
@@ -163,6 +167,7 @@ def _controls(base: str, mode: str, owner: str | None, m: str, end: str, frm: st
     seg = " ".join(f'<a class="{"on" if mode == key else ""}" href="{base}{_qs(p=key, end=end, **own)}">{label}</a>'
                    for key, label in (("month", "Month"), ("6", "6 months"), ("12", "12 months")))
     seg += f' <a class="{"on" if mode == "custom" else ""}" href="#custom" onclick="document.getElementById(\'custom\').open=true">Custom</a>'
+    seg += f' <a href="/year{_qs(y=(m or end)[:4], owner=owner)}">Year</a>'
     who = " ".join(f'<a class="{"on" if (owner or "") == v else ""}" href="{base}{_qs(p=("custom" if mode == "custom" else mode), m=m if mode == "month" else None, end=end if mode != "month" else None, **{"from": frm if mode == "custom" else None, "to": to if mode == "custom" else None}, owner=v)}">{t}</a>'
                    for v, t in [("", "Household")] + [(o, o) for o in owners])
     if mode == "month":
@@ -232,7 +237,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     else:
         win = months_between(frm, to) if mode == "custom" else [x for x in months if x <= end][-int(mode):]
         body = _period_view(conn, ctx, d, win, owner, base, mode, q)
-    return layout(conn, ctx, "/", "Overview", f"<h1>Overview</h1>{notice}{controls}{_dataline(conn, ctx.today)}{body}{vit}{_tasks(conn, ctx)}")
+    return layout(conn, ctx, "/", "Overview", f"<h1>Overview</h1>{notice}{controls}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
 
 
 def _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) -> str:

@@ -47,14 +47,15 @@ def _round_top(x: float, y: float, w: float, h: float, r: float = 4) -> str:
             f"H{x + w - r:.1f} Q{x + w:.1f},{y:.1f} {x + w:.1f},{y + r:.1f} V{y + h:.1f} Z")
 
 
-def line_chart(points: list[tuple[str, float]], currency: str, label: str) -> str:
+def line_chart(points: list[tuple[str, float]], currency: str, label: str, targets: list[tuple[str, float]] | None = None) -> str:
     """points: (iso date, value). Time-proportional x axis, zero baseline, direct label on the last point."""
     if not points:
         return '<p class="muted">No data yet.</p>'
     W, H, L, R, T, B = 640, 250, 56, 64, 16, 30
     days = [date.fromisoformat(d).toordinal() for d, _ in points]
     x0, x1 = min(days), max(days)
-    top, ticks = nice_axis(max(v for _, v in points))
+    targets = targets or []
+    top, ticks = nice_axis(max([v for _, v in points] + [v for _, v in targets]))
     floor = min(0.0, min(v for _, v in points))
     if floor < 0:
         top, ticks = nice_axis(max(abs(floor), top))
@@ -72,6 +73,9 @@ def line_chart(points: list[tuple[str, float]], currency: str, label: str) -> st
         y = sy(t)
         out.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>'
                    f'<text x="{L - 8}" y="{y + 4:.1f}" text-anchor="end" class="axis">{escape(compact(t, currency))}</text>')
+    for tname, tval in targets:
+        out.append(f'<line x1="{L}" x2="{W - R}" y1="{sy(tval):.1f}" y2="{sy(tval):.1f}" stroke="var(--critical)" stroke-width="1.5" stroke-dasharray="6 4"/>'
+                   f'<text x="{L + 4}" y="{sy(tval) - 5:.1f}" class="direct" fill="var(--critical)">Goal: {escape(tname)} {escape(compact(tval, currency))}</text>')
     pts = " ".join(f"{sx(d):.1f},{sy(v):.1f}" for d, (_, v) in zip(days, points))
     out.append(f'<polyline points="{pts}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>')
     xs = [sx(d) for d in days]

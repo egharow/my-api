@@ -105,7 +105,7 @@ def pending(conn: sqlite3.Connection, today: str, days: int = STALE_DAYS):
     out = []
     for a in conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
                              LEFT JOIN owners o ON o.id = a.owner_id
-                             WHERE a.active = 1 AND a.kind != 'card' AND a.issuer != 'sheet' AND (a.closed_on IS NULL OR a.closed_on > ?)
+                             WHERE a.active = 1 AND a.kind != 'card' AND a.issuer NOT IN ('sheet','cash') AND (a.closed_on IS NULL OR a.closed_on > ?)
                              ORDER BY a.sort_order, o.name, a.kind, a.label""", (today,)):
         l = latest_by.get(a["id"])
         out.append({"account": a, "latest": l, "current": bool(l and l["as_of"] >= cutoff)})

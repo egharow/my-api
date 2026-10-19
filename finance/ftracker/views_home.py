@@ -142,7 +142,20 @@ def spending_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
 def wealth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     body = networth_body(conn, ctx, q, "/wealth")
     gp = goals.all_progress(conn, ctx.today)
-    cards = "".join(_goal_card(g) for g in gp)
-    goals_html = (f'<section class="card" style="margin-top:16px"><h2>Goals <small><a href="/goals">edit</a></small></h2>{cards}</section>'
-                  if gp else '<section class="card" style="margin-top:16px"><h2>Goals</h2><p class="muted">No goals yet. <a href="/goals">Add one</a>.</p></section>')
+
+    def card(g):
+        gone = "" if ctx.readonly else _form(ctx, "/goals/remove", f'<input type="hidden" name="id" value="{g["id"]}"><button class="quiet">Remove</button>', "inline")
+        return _goal_card(g) + (f'<p style="margin:0 0 10px">{gone}</p>' if gone else "")
+    cards = "".join(card(g) for g in gp)
+    owner_opts = '<option value="">Household</option>' + "".join(f"<option>{esc(o)}</option>" for o in ctx.owners)
+    add = "" if ctx.readonly else (
+        '<details style="margin-top:10px"' + ("" if gp else " open") + '><summary><b>Set a wealth goal</b></summary>'
+        + _form(ctx, "/goals", '<input type="hidden" name="back" value="/wealth"><input type="hidden" name="currency" value="ILS">'
+                '<div class="row" style="margin-top:8px"><label>Goal <input name="name" placeholder="for example Financial freedom" required></label> '
+                '<label>Amount ₪ <input name="amount" inputmode="decimal" size="12" required></label> '
+                f'<label>By <input type="date" name="by"></label> <label>Whose <select name="owner">{owner_opts}</select></label> '
+                '<label>Expected return % a year <input name="return" size="3" value="0"></label> <button>Add goal</button></div>', "")
+        + '<p class="cap">The goal counts your total net worth and shows as a red line on the chart. For one account only, use <a href="/goals">Goals</a>. '
+          'Try different returns in the <a href="/simulator">simulator</a>.</p></details>')
+    goals_html = f'<section class="card" style="margin-top:16px"><h2>Goals <small><a href="/goals">all options</a></small></h2>{cards or "<p class=muted>No goals yet.</p>"}{add}</section>'
     return layout(conn, ctx, "/wealth", "Wealth", f'<h1>Wealth</h1><p><a class="btnlink" href="/simulator">Simulate the future</a></p>{body}{goals_html}')

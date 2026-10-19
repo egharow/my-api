@@ -129,7 +129,7 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
         r = conn.execute("SELECT name FROM owners WHERE id = ?", (a["owner_id"],)).fetchone()
         return r[0] if r else None
 
-    for a in conn.execute("SELECT * FROM accounts WHERE kind IN ('card','bank') AND active = 1 AND issuer != 'sheet' ORDER BY kind, label"):
+    for a in conn.execute("SELECT * FROM accounts WHERE kind IN ('card','bank') AND active = 1 AND issuer NOT IN ('sheet','cash') ORDER BY kind, label"):
         matched_accounts.add(a["id"])
         if a["kind"] == "card":
             stmts = [date.fromisoformat(r[0]) for r in conn.execute(
@@ -164,7 +164,7 @@ def checklist(conn: sqlite3.Connection, today: str) -> dict:
 
     for src in EXTRA_SOURCES:
         found = False
-        for a in conn.execute("SELECT * FROM accounts WHERE kind = ? AND active = 1 AND issuer != 'sheet'", (src["kind"],)):
+        for a in conn.execute("SELECT * FROM accounts WHERE kind = ? AND active = 1 AND issuer NOT IN ('sheet','cash')", (src["kind"],)):
             if src.get("issuer") and a["issuer"] != src["issuer"]:
                 continue
             if src.get("owner") and owner_name(a) != src["owner"]:
@@ -230,7 +230,7 @@ def history(conn: sqlite3.Connection, today: str, max_months: int = 24) -> list[
     newest = (now_d.year, now_d.month - 2)
     while newest[1] < 1:
         newest = (newest[0] - 1, newest[1] + 12)
-    accounts = conn.execute("SELECT * FROM accounts WHERE kind IN ('card','bank') AND active = 1 AND issuer != 'sheet' ORDER BY kind, label").fetchall()
+    accounts = conn.execute("SELECT * FROM accounts WHERE kind IN ('card','bank') AND active = 1 AND issuer NOT IN ('sheet','cash') ORDER BY kind, label").fetchall()
     info = []
     first_month = None
     for a in accounts:

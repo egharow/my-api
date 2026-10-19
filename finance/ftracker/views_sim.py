@@ -4,7 +4,7 @@ import sqlite3
 from html import escape as esc
 
 from . import balances, summary
-from .views import Ctx, layout
+from .views import Ctx, _form, layout
 
 SIM_JS = r"""
 (function(){
@@ -57,6 +57,8 @@ function render(){
   var need=function(){var lo=-5,hi=80;for(var i=0;i<50;i++){var mid2=(lo+hi)/2,r=run(mid2,p),e=after(r[r.length-1],p).net;if(e>=p.target)hi=mid2;else lo=mid2}return hi};
   T('o_target',p.target>0?((hit===null?'The goal is not reached in '+p.years+' years at '+rate.toFixed(1)+'%.':(hit===0?'You are already there.':'After tax, you reach it in year '+hit+'.'))+
     (hit!==null?'':' To reach it in '+p.years+' years you would need about '+(need()>=80?'more than 80':need().toFixed(1))+'% a year (before fees).')):'');
+  $('g_wrap').hidden=!(p.target>0);
+  if(p.target>0){var dt=new Date();dt.setFullYear(dt.getFullYear()+p.years);$('g_amount').value=Math.round(p.target);$('g_by').value=dt.toISOString().slice(0,10);$('g_return').value=rate}
   $('chart').innerHTML='<div class="legend"><span><i style="background:var(--c1)"></i>What you put in</span><span><i style="background:var(--c3)"></i>Growth</span>'+
     '<span><i style="background:var(--ink2)"></i>Dashed: '+(rate+spread).toFixed(1)+'% and '+(rate-spread).toFixed(1)+'%</span></div>'+svg(low,mid,hi,p);
   var rows='';mid.forEach(function(r,y){var x=after(r,p);rows+='<tr><td>'+y+'</td><td class="n">'+money(r.put)+'</td><td class="n">'+money(r.bal-r.put)+'</td><td class="n">'+money(r.bal)+'</td><td class="n">'+money(x.net)+'</td><td class="n">'+money(x.net/Math.pow(1+p.inf/100,y))+'</td></tr>'});
@@ -132,6 +134,8 @@ def simulator_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
 <div class="simrow"><label for="spread">Show a range of ±</label><span class="simnum"><input type="number" id="spread" step="0.5" value="2" inputmode="decimal"> % a year</span></div>
 <div class="simrow"><label for="target">My goal</label><span class="simnum">₪ <input type="number" id="target" step="10000" value="" placeholder="optional" inputmode="decimal"></span>
 <small class="cap" id="o_target"></small></div>
+<div id="g_wrap" hidden>{_form(ctx, "/goals", '<input type="hidden" name="back" value="/wealth"><input type="hidden" name="currency" value="ILS"><input type="hidden" name="name" id="g_name" value="Simulator goal">'
+  '<input type="hidden" name="amount" id="g_amount"><input type="hidden" name="by" id="g_by"><input type="hidden" name="return" id="g_return"><button type="submit">Save my goal on the Wealth page</button>', "")}</div>
 <p><button class="quiet" id="reset" type="button">Start over</button></p>
 </section>
 <section>

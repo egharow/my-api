@@ -52,6 +52,13 @@ def _filter_panel(conn: sqlite3.Connection, ctx: Ctx, cur: str) -> str:
     return f'{state}<details class="card" style="margin-bottom:12px"{" open" if off else ""}><summary><b>Choose what counts in net worth</b></summary>{form}</details>'
 
 
+def _goal_lines(conn: sqlite3.Connection, cur: str) -> list[tuple[str, float]]:
+    """Net worth goals (the ones that count every account) in this currency, drawn as lines on the chart."""
+    return [(r["name"], r["target_amount"]) for r in conn.execute(
+        """SELECT g.name, g.target_amount FROM goals g WHERE g.active = 1 AND g.currency = ?
+           AND NOT EXISTS (SELECT 1 FROM goal_accounts x WHERE x.goal_id = g.id)""", (cur,))]
+
+
 def _made_of(snaps, kinds, cur) -> str:
     if len(snaps) < 2 or not kinds:
         return ""
@@ -120,7 +127,7 @@ def networth_body(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/wea
     deltas = [(snaps[i]["as_of"], snaps[i]["total"] - snaps[i - 1]["total"]) for i in range(1, len(snaps))]
     made_of = _made_of(snaps, kinds, cur)
     html = (f'<p>{who} &nbsp;·&nbsp; {money_sw}</p>{_filter_panel(conn, ctx, cur)}{tiles}{source}'
-            f'<section class="card"><h2>Total over time</h2>{charts.line_chart(pts, cur, "Net worth over time")}</section>'
+            f'<section class="card"><h2>Total over time</h2>{charts.line_chart(pts, cur, "Net worth over time", _goal_lines(conn, cur))}</section>'
             f'{made_of}'
             f'<section class="card" style="margin-top:16px"><h2>Change between updates</h2>{charts.bar_chart(deltas, cur, "Net worth change", signed=True)}'
             f'<p class="muted">Blue: it grew. Orange: it fell. Each bar is the change since the previous update of your balances.</p></section>'

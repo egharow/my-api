@@ -201,7 +201,7 @@ def delete_account(conn: sqlite3.Connection, account_id: int) -> None:
 
 def move_account(conn: sqlite3.Connection, account_id: int, direction: str) -> None:
     """Move an account one place up or down in the list. The order is saved and used everywhere accounts are listed."""
-    rows = conn.execute("""SELECT id FROM accounts WHERE active = 1 AND kind != 'card' AND issuer != 'sheet'
+    rows = conn.execute("""SELECT id FROM accounts WHERE active = 1 AND kind != 'card' AND issuer NOT IN ('sheet','cash')
                            AND (closed_on IS NULL OR closed_on > date('now')) ORDER BY sort_order, kind, label""").fetchall()
     ids = [r[0] for r in rows]
     if account_id not in ids:
