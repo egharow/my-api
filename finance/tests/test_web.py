@@ -702,4 +702,4 @@ def test_a_new_screen_is_matched_by_section_owner_and_balance(app, conn):
     picks = screens.suggest_all(conn, found, "2026-11-02")
     chosen = {r["label"]: p for r, p in zip(found, picks)}
     assert chosen["מורים תיכוניים"] == (target, "balance")
-    assert chosen["מחר"][0] != target                                                          # not given twice
+    assert chosen["מחר השתלמות"][0] != target                                                          # not given twice
