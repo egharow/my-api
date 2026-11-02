@@ -61,6 +61,9 @@ def _similar_past(conn: sqlite3.Connection, desc: str):
     return best
 
 
+SECTORS = {"מזון ומשקאות": "Groceries", "מזון מהיר": "Eating out", "מסעדות": "Eating out", "רפואה ובריאות": "Medical", "ריהוט ובית": "Home",
+           "עמותות ותרומות": "Donations", "ביגוד והנעלה": "Clothes", "אופנה": "Clothes", "דלק": "Fuel & parking", "ביטוח": "Insurance",
+           "חינוך": "Education", "קוסמטיקה": "Beauty care", "בילוי ופנאי": "Fun", "פנאי ובילוי": "Fun"}     # the card company's own sector names
 _ONLINE = ("AMAZON", "MAZON", "MKTPL", "ALIEXPRESS", "LIEXPRESS", "TEMU", "SHEIN", "EBAY", "ETSY", "PAYPAL")   # foreign-currency shops that are not travel
 HABIT_MIN = 3                      # approved this many times, always into the same category
 
@@ -178,6 +181,11 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
         if travel:
             category_id, confidence = travel["id"], 0.3
             basis = f"paid in {t['orig_currency']}: a trip or online shopping, please check"
+    if category_id == uncategorised_id(conn) and not rule and (t["detail"] or "").startswith("ענף:"):
+        sector = (t["detail"].split("·")[0])[len("ענף:"):].strip()
+        mapped = conn.execute("SELECT id FROM categories WHERE name = ?", (SECTORS.get(sector, ""),)).fetchone()
+        if mapped:
+            category_id, confidence, basis = mapped["id"], 0.5, f"the card company calls it “{sector}”"
     if t["amount"] > 0 and kind == "purchase":
         kind = "refund"
 

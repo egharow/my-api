@@ -20,7 +20,7 @@ def read_rows(path) -> list[list]:
 
 def looks_like(rows: list[list]) -> bool:
     head = " ".join(clean(c) for r in rows[:8] for c in r if c)
-    return "פירוט עסקאות" in head and ("מסטרקארד" in head or "ויזה" in head or "ישראכרט" in head)
+    return "פירוט עסקאות" in head and ("מסטרקארד" in head or "ויזה" in head or "ישראכרט" in head or "אמריקן אקספרס" in head)
 
 
 def parse_rows(rows: list[list]) -> ParsedFile:
@@ -86,12 +86,13 @@ def parse_rows(rows: list[list]) -> ParsedFile:
     if stated_total is None:
         raise ParseError("statement total row not found")
 
+    issuer = "amex" if "אמריקן" in product else "isracard"            # Isracard issues American Express cards in the same layout
     st = ParsedStatement(
-        issuer="isracard", account_kind="card", last4=last4, product=product,
+        issuer=issuer, account_kind="card", last4=last4, product=product,
         billing_date=billing, period_start=None, period_end=None,
         stated_total=stated_total, currency="ILS", txns=txns, holder_text=holder or "",
     )
-    return ParsedFile("isracard", "card_export", [st])
+    return ParsedFile(issuer, "card_export", [st])
 
 
 def parse(path) -> ParsedFile:

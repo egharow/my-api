@@ -116,3 +116,36 @@ def test_leumi_reads_columns_and_signs():
 def test_leumi_detects_by_headers_not_order():
     assert leumi_pdf.looks_like([_leumi_page()])
     assert not leumi_pdf.looks_like([[_w("hello", 1, 2, 3)]])
+
+
+def test_one_zero_movements_are_decoded_and_ordered_by_balance():
+    from datetime import date
+    from ftracker.parsers import onezero
+    rows = [["תאריך תנועה", "תאריך ערך", "סוג פעולה", "תיאור", "סכום פעולה", "מטבע", "חיוב/זיכוי", "יתרה", "אסמכתא"],
+            [46310.0, 46310.0, "העברות", "‭99010330/10-933-000585939/םולשת/אירבג םיקילא/‭ימואל", 5000.0, "ILS", "זיכוי", 6000.0, "r1"],
+            [46310.0, 46310.0, "העברות", "זיכוי דמי מנוי\r", 40.0, "ILS", "זיכוי", 1000.0, "r2"],
+            [46310.0, 46310.0, "אחר", "דמי מנוי - FounderPlusS", -40.0, "ILS", "חיוב", 960.0, "r3"],
+            [46309.0, 46309.0, "חיובים", "‭13009998/6045/‭טקרייד-טרכארשי", -100.0, "ILS", "חיוב", 1000.0, "r4"]]
+    st = onezero.parse_rows(rows).statements[0]
+    assert st.issuer == "onezero" and st.account_kind == "bank" and len(st.txns) == 4
+    assert st.txns[0].description.startswith("העברות לאומי/אליקים גבריא/תשלום")        # read the right way round
+    assert "6045" in st.txns[3].description and "ישראכרט" in st.txns[3].description
+    assert st.txns[1].description == "אחר דמי מנוי - FounderPlusS" or st.txns[2].description == "אחר דמי מנוי - FounderPlusS"
+    for a, b in zip(st.txns, st.txns[1:]):
+        assert abs(a.balance_after - (b.balance_after + a.amount)) < 0.01             # the balances chain, also within one day
+    assert st.period_end == date(2026, 11, 2) or st.period_end.year == 2026
+
+
+def test_cal_statement_rows_are_read_and_club_points_are_skipped():
+    from datetime import datetime
+    from ftracker.parsers import cal
+    rows = [["פירוט עסקאות לחשבון לאומי לישראל 933-585939 לכרטיס מאסטרקארד WORLD המסתיים ב-5962"], ["עסקאות לחיוב ב-02/11/2026: 124.00 ₪"],
+            ["תאריך\nעסקה", "שם בית עסק", "סכום\nעסקה", "סכום\nחיוב", "סוג\nעסקה", "ענף", "הערות"],
+            [datetime(2026, 10, 31), "החזר FLYALL", -47.39, None, "צבירה למועדון", None, None],
+            [datetime(2026, 10, 30), "מאפיית לחם משנה", 24, 24, "רגילה", "מזון מהיר", None],
+            [datetime(2026, 10, 30), "מאפיית לחם משנה", 24, 24, "רגילה", "מזון מהיר", None],
+            [datetime(2026, 10, 25), "סופר פארם", 76, 76, "רגילה", "רפואה ובריאות", None]]
+    st = cal.parse_rows(rows).statements[0]
+    assert (st.issuer, st.last4, st.stated_total) == ("cal", "5962", 124.0) and len(st.txns) == 3
+    assert len({t.voucher for t in st.txns}) == 3                                    # two identical purchases on one day stay two lines
+    assert st.txns[0].detail.startswith("ענף: מזון מהיר")

@@ -20,7 +20,7 @@ from .normalize import norm_description
 from .parsers.base import ParsedFile, ParsedStatement, ParsedTxn
 from .parsers.detect import Unrecognised, parse_file
 
-ISSUER_NAMES = {"isracard": "Isracard", "amex": "Amex", "leumi": "Leumi"}
+ISSUER_NAMES = {"isracard": "Isracard", "amex": "Amex", "leumi": "Leumi", "cal": "Cal", "onezero": "וואן זירו"}
 SUPPORTED = {".xlsx", ".xls", ".pdf"}
 
 
@@ -67,7 +67,11 @@ def ensure_account(conn: sqlite3.Connection, st: ParsedStatement) -> int:
         if row["owner_id"] is None and owner is not None:
             conn.execute("UPDATE accounts SET owner_id = ? WHERE id = ?", (owner, row["id"]))
         return row["id"]
-    label = f"{ISSUER_NAMES.get(st.issuer, st.issuer.title())} {st.last4}"
+    label = f"{ISSUER_NAMES.get(st.issuer, st.issuer.title())} {st.last4}".strip()
+    mine = conn.execute("SELECT id FROM accounts WHERE issuer = 'manual' AND label = ? AND kind = ? AND active = 1", (label, st.account_kind)).fetchone()
+    if mine:                                   # an account you already typed in by hand: this file belongs to it
+        conn.execute("UPDATE accounts SET issuer = ?, last4 = ? WHERE id = ?", (st.issuer, st.last4, mine["id"]))
+        return mine["id"]
     cur = conn.execute(
         "INSERT INTO accounts (kind, issuer, label, last4, owner_id, currency, created_at) VALUES (?,?,?,?,?,?,?)",
         (st.account_kind, st.issuer, label, st.last4, owner, st.currency, now()))

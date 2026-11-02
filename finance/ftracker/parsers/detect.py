@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from . import amex, isracard, isracard_pdf, leumi_pdf
+from . import amex, cal, isracard, isracard_pdf, leumi_pdf, onezero
 from .base import ParseError, ParsedFile
 
 
 # Bump this when a reader is added or improved, so files that could not be read before are tried again.
-PARSERS_VERSION = "2"
+PARSERS_VERSION = "3"
 
 
 class Unrecognised(Exception):
@@ -20,11 +20,15 @@ def parse_file(path: Path) -> ParsedFile:
             rows = isracard.read_rows(path)
             if isracard.looks_like(rows):
                 return isracard.parse_rows(rows)
+            if cal.looks_like(rows):
+                return cal.parse_rows(rows)
             raise Unrecognised("Excel file is not a known card statement layout")
         if ext == ".xls":
             rows = amex.read_rows(path)
             if amex.looks_like(rows):
                 return amex.parse_rows(rows)
+            if onezero.looks_like(rows):
+                return onezero.parse_rows(rows)
             raise Unrecognised("Excel file is not a known card export layout")
         if ext == ".pdf":
             pages = isracard_pdf.read_pages(path)
