@@ -129,6 +129,7 @@ input:not([type=checkbox]):not([type=radio]),select{min-height:34px}
 .tripgrid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(230px,1fr))}.tripcard{display:flex;flex-direction:column;gap:2px;text-decoration:none;color:var(--ink)}.tripcard:hover{border-color:var(--ink)}.tripamt{font-family:var(--num);font-size:22px;font-weight:600;margin-top:6px}
 .alert{display:grid;grid-template-columns:14px 1fr auto;gap:10px;align-items:start;padding:8px 0;border-top:1px dashed var(--grid)}.alert:first-of-type{border-top:0}.alert .dot{width:9px;height:9px;border-radius:50%;margin-top:6px;background:var(--axis)}.alert.warning .dot{background:var(--warning)}
 .yeartable{font-size:13px}.yeartable th,.yeartable td{padding:5px 6px;white-space:nowrap}.yeartable td.heat a{color:var(--ink);text-decoration:none}.yeartable tr.tot td{border-top:2px solid var(--rule)}
+.shotgrid{display:grid;gap:16px;grid-template-columns:minmax(240px,400px) minmax(0,1fr);align-items:start}@media (max-width:860px){.shotgrid{grid-template-columns:1fr}}.shotimg{position:sticky;top:64px}.shotimg img{max-width:100%;border:1px solid var(--border);border-radius:2px}
 .legend a{color:inherit;text-decoration:none;display:inline-flex;align-items:center;cursor:pointer}.legend a.off{opacity:.4;text-decoration:line-through}.legend a:hover{text-decoration:underline}
 svg a{cursor:pointer}svg a:hover rect[fill^="var(--c"]{opacity:.82}svg a:focus-visible{outline:2px solid var(--accent)}
 .legend{flex-wrap:wrap;row-gap:4px;column-gap:12px}.legend span{white-space:nowrap}
@@ -646,7 +647,8 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                     f'<td>{esc(l["as_of"]) if l else ""}{" ▲ old" if stale else ""}</td>'
                     f'<td><input name="bal_{a["id"]}" inputmode="decimal" size="12" placeholder="new value"> {esc(a["currency"])}</td>'
                     + (f'<td><label class="cap"><input type="checkbox" name="same_{a["id"]}" value="1"> same</label></td>' if l else "<td></td>") + '</tr>')
-    banner = (f'<div class="banner">Balances are due{" (last updated " + esc(last) + ")" if last else ""}.</div>' if due else "")
+    banner = (f'<div class="banner">Balances are due{" (last updated " + esc(last) + ")" if last else ""}. <a href="/screens">Update them from a screenshot</a></div>' if due else
+              '<p><a class="btnlink" href="/screens">Update balances from a screenshot</a></p>')
     kinds = "".join(f"<option>{k}</option>" for k in ("bank", "investment", "pension", "savings", "real_estate", "loan", "other"))
     owner_opts = '<option value="">(none)</option>' + "".join(f"<option>{esc(o)}</option>" for o in ctx.owners)
     form = _form(ctx, "/balances",

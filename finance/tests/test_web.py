@@ -587,3 +587,70 @@ def test_wealth_goals_can_be_added_from_the_wealth_page_and_removed(app, conn):
     assert dict(post(app, "/goals/remove", {"id": str(gid)}).headers)["Location"] == "/wealth"
     assert "Freedom" not in text(get(app, "/wealth"))
     assert 'id="g_wrap"' in text(get(app, "/simulator"))
+
+
+def _words(rows):
+    """rows: [(y, [(text, x), ...])] -> OCR-like words."""
+    return [{"text": t, "x": float(x), "y": float(y), "w": 60.0, "h": 20.0} for y, items in rows for t, x in items]
+
+
+SCREEN = _words([
+    (10, [("שווי", 380), ("נכסים", 340), ("₪538,775.07", 40)]),
+    (60, [('עו"ש', 400), ("₪9,742.91", 40)]),
+    (90, [("2", 400), ("חשבונות", 360)]),
+    (140, [("ONE", 400), ("ZERO", 360), ("₪867.68", 40)]),
+    (170, [("מועד", 400), ("עדכון:", 360), ("02/11/26", 300)]),
+    (220, [("בנק", 400), ("לאומי", 360), ("₪8,875.23", 40)]),
+    (300, [('מט"ח', 400), ("₪478.24", 40)]),
+    (330, [("1", 400), ("חשבונות", 360)]),
+    (380, [("ONE", 400), ("ZERO", 360), ("$152.5", 40)]),
+    (410, [("יתרה", 400), ("משוערת:", 360), ("₪478.24", 40)]),
+])
+
+
+def test_amounts_are_found_with_their_section_and_totals_are_marked():
+    from ftracker import screens
+    got = screens.extract(SCREEN)
+    by = {(r["section"], r["label"]): r for r in got}
+    assert by[('עו"ש', "ONE ZERO")]["amount"] == 867.68 and not by[('עו"ש', "ONE ZERO")]["total"]
+    assert by[('עו"ש', "בנק לאומי")]["amount"] == 8875.23
+    assert by[('מט"ח', "ONE ZERO")]["amount"] == 152.5 and by[('מט"ח', "ONE ZERO")]["currency"] == "USD"
+    assert all(r["total"] for r in got if r["label"] in ("שווי נכסים", 'עו"ש', 'מט"ח') or "משוערת" in r["label"])     # totals and estimates are not balances
+
+
+def test_a_screenshot_is_read_shown_beside_the_picture_and_saved_only_on_approval(app, conn, home, monkeypatch):
+    from ftracker import ocr, screens
+    monkeypatch.setattr(ocr, "read_words", lambda path: (SCREEN, ""))
+    ils = [r[0] for r in conn.execute("SELECT id FROM accounts WHERE currency = 'ILS' AND kind != 'card' AND issuer NOT IN ('sheet', 'cash') AND active = 1 ORDER BY id")]
+    acct, other = ils[0], ils[1]
+    name = screens.save_upload(home, "wealth.png", b"\x89PNG not really a picture")
+    assert name in text(get(app, "/screens"))
+    assert get(app, f"/screens/file/{name}").status == 200 and get(app, "/screens/file/..%2Fevil.png").status == 404
+    page = text(get(app, f"/screen/{name}"))
+    assert "Check the numbers against the picture" in page and "867.68" in page and "8,875.23" in page
+    assert "chip\">total" in page
+    before = conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0]
+    assert conn.execute("SELECT COUNT(*) FROM balances").fetchone()[0] == before                   # looking changes nothing
+    res = post(app, "/screens/approve", {"image": name, "n": "4", "as_of": "2026-11-02",
+                                         "r3_on": "1", "r3_amount": "867.68", "r3_account": str(acct), "r3_label": "ONE ZERO", "r3_section": 'עו"ש', "r3_cur": "ILS",
+                                         f"m_{other}": "2,500"})
+    assert res.status == 303
+    got = dict(conn.execute("SELECT account_id, amount FROM balances WHERE as_of = '2026-11-02'").fetchall())
+    assert got[acct] == 867.68 and got[other] == 2500.0
+    assert conn.execute("SELECT account_id FROM screen_aliases WHERE label = 'ONE ZERO'").fetchone()[0] == acct      # remembered
+    assert screens.suggest(conn, 'עו"ש', "ONE ZERO") == acct                                         # and used the next time
+    assert name not in text(get(app, "/screens"))                                                    # no longer waiting
+    assert "not a number" in _flash(post(app, "/screens/approve", {"image": name, "n": "1", "r0_on": "1", "r0_amount": "x", "r0_account": str(acct)}))
+
+
+def test_images_in_the_drive_folder_are_offered_and_only_pictures_are_accepted(app, conn, home, tmp_path):
+    from ftracker import screens, watchfolder
+    drive = tmp_path / "d"; drive.mkdir()
+    (drive / "balances.png").write_bytes(b"x1"); (drive / "notes.txt").write_text("no")
+    watchfolder.set_folder(conn, home, str(drive))
+    assert "balances.png" in text(get(app, "/screens")) and "notes.txt" not in text(get(app, "/screens"))
+    res = post(app, "/screens/take", {"name": "balances.png"})
+    assert dict(res.headers)["Location"].startswith("/screen/")
+    import pytest
+    with pytest.raises(ValueError):
+        screens.save_upload(home, "evil.exe", b"abc")

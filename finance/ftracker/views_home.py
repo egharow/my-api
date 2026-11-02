@@ -158,4 +158,4 @@ def wealth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         + '<p class="cap">The goal counts your total net worth and shows as a red line on the chart. For one account only, use <a href="/goals">Goals</a>. '
           'Try different returns in the <a href="/simulator">simulator</a>.</p></details>')
     goals_html = f'<section class="card" style="margin-top:16px"><h2>Goals <small><a href="/goals">all options</a></small></h2>{cards or "<p class=muted>No goals yet.</p>"}{add}</section>'
-    return layout(conn, ctx, "/wealth", "Wealth", f'<h1>Wealth</h1><p><a class="btnlink" href="/simulator">Simulate the future</a></p>{body}{goals_html}')
+    return layout(conn, ctx, "/wealth", "Wealth", f'<h1>Wealth</h1><p><a class="btnlink" href="/simulator">Simulate the future</a> <a class="btnlink" href="/screens">Update balances from a screenshot</a></p>{body}{goals_html}')

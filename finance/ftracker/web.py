@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_recurring, views_setup, views_sim, views_trips, views_year, views_trends
+from . import alerts, appmode, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_recurring, views_screens, views_setup, views_sim, views_trips, views_year, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -24,9 +24,9 @@ from .db import connect
 
 PHONE_PAGES = {"/", "/spending", "/trends", "/wealth", "/networth", "/health", "/ping"}
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
-CSP = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; "
+CSP = ("default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self' data:; "
        "form-action 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'")
-UPLOAD_PATHS = {"/upload", "/history/upload"}
+UPLOAD_PATHS = {"/upload", "/history/upload", "/screens/upload"}
 TOKEN_RE = re.compile(r"^[0-9a-f]{16}$")
 
 
@@ -203,6 +203,17 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/screens":
+            return _html(200, views_screens.list_page(conn, ctx, self.home))
+        if path.startswith("/screen/"):
+            return _html(200, views_screens.review_page(conn, ctx, self.home, unquote(path[8:])))
+        if path.startswith("/screens/file/"):
+            name = screens.safe_name(unquote(path[14:]))
+            f = screens.dir_of(self.home) / (name or "")
+            if not name or not f.is_file():
+                return _html(404, "<h1>Not found</h1>")
+            kind = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".bmp": "image/bmp"}[f.suffix.lower()]
+            return Response(200, f.read_bytes(), [("Content-Type", kind), ("Cache-Control", "no-store"), ("X-Content-Type-Options", "nosniff")])
         if path == "/year":
             return _html(200, views_year.year_page(conn, ctx, q))
         if path == "/recurring":
@@ -261,6 +272,14 @@ class App:
             return self._json(400, {"error": str(exc)})
         if not files:
             return self._json(400, {"error": "No file arrived."})
+        if path == "/screens/upload":
+            saved, errors = [], []
+            for fl in files:
+                try:
+                    saved.append(screens.save_upload(self.home, fl.name, fl.data))
+                except ValueError as exc:
+                    errors.append(str(exc))
+            return self._json(200 if saved else 400, {"saved": saved, "error": "; ".join(errors)} if errors else {"saved": saved})
         if path == "/upload":
             saved, rejected = uploads.save_to_inbox(files, self.home.inbox)
             return self._json(200, {"saved": saved, "rejected": rejected})
@@ -563,6 +582,42 @@ class App:
             if path == "/watch/check":
                 note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
                 return self._redirect("/upload", note or "Nothing new in the folder.")
+            if path == "/screens/install":
+                ok, log = ocr.install()
+                return self._redirect("/screens", "Text recognition is on." if ok else "It could not be installed: " + log[-160:], err=not ok)
+            if path == "/screens/take":
+                folder = watchfolder.get(conn)
+                try:
+                    name = screens.take_from_folder(self.home, folder or "", form.get("name", ""))
+                except ValueError as exc:
+                    return self._redirect("/screens", str(exc), err=True)
+                return self._redirect("/screen/" + quote(name))
+            if path == "/screens/skip":
+                name = screens.safe_name(form.get("image", ""))
+                f = screens.dir_of(self.home) / (name or "")
+                if name and f.is_file():
+                    screens.mark_done(conn, f)
+                return self._redirect("/screens", "Left as it is.")
+            if path == "/screens/approve":
+                name = screens.safe_name(form.get("image", ""))
+                f = screens.dir_of(self.home) / (name or "")
+                rows = []
+                try:
+                    for i in range(int(form.get("n", "0"))):
+                        if form.get(f"r{i}_on") == "1" and form.get(f"r{i}_account", "").isdigit():
+                            rows.append({"account_id": int(form[f"r{i}_account"]), "amount": float(form[f"r{i}_amount"].replace(",", "").replace("₪", "").replace("$", "").strip()),
+                                         "currency": form.get(f"r{i}_cur", "ILS"), "label": form.get(f"r{i}_label", ""), "section": form.get(f"r{i}_section", "")})
+                    for key, value in form.items():
+                        if key.startswith("m_") and key[2:].isdigit() and value.strip():
+                            rows.append({"account_id": int(key[2:]), "amount": float(value.replace(",", "").replace("₪", "").replace("$", "").strip())})
+                except ValueError:
+                    return self._redirect("/screen/" + quote(name or ""), "One of the amounts is not a number. Check the boxes.", err=True)
+                if not rows:
+                    return self._redirect("/screen/" + quote(name or ""), "Nothing is ticked and no balance was typed.", err=True)
+                n = screens.approve(conn, rows, form.get("as_of") or self._today())
+                if name and f.is_file():
+                    screens.mark_done(conn, f)
+                return self._redirect("/balances", f"{n} balance(s) saved from the screenshot")
             if path == "/alerts/dismiss":
                 alerts.dismiss(conn, form.get("id", ""))
                 return self._redirect("/alerts", "Dismissed")
