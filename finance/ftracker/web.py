@@ -347,6 +347,8 @@ class App:
             return _html(403, "<h1>Blocked: reload the page and try again</h1>")
         back = urlparse(headers.get("referer", "")).path or ("/setup" if path.startswith("/setup") else "/history" if path.startswith("/history") else "/")
         who = ctx.who or "user"
+        if path.startswith("/watch/"):
+            back = "/upload"
         try:
             if path == "/who":
                 return self._redirect(back, cookies=[("Set-Cookie", f"who={quote(form.get('who', ''))}; Path=/; SameSite=Strict; Max-Age=31536000")])
@@ -452,20 +454,20 @@ class App:
                         balances.set_balance_for(conn, p_["account"]["id"], p_["latest"]["amount"], as_of)
                         kept += 1
                 return self._redirect("/balances", f"{saved} balance(s) saved" + (f", {kept} kept as they were" if kept else ""))
-            back = form.get("back") if form.get("back") in ("/upload", "/sheet") else "/sheet"
+            sheet_back = form.get("back") if form.get("back") in ("/upload", "/sheet") else "/sheet"
             if path == "/sheet/link":
                 sheetsync.link(conn, form.get("url", ""))
                 res = sheetsync.push(conn, self._today())
-                return self._redirect(back, ("Linked. " if res["ok"] else "Saved, but the first update failed: ") + res["detail"], err=not res["ok"])
+                return self._redirect(sheet_back, ("Linked. " if res["ok"] else "Saved, but the first update failed: ") + res["detail"], err=not res["ok"])
             if path == "/sheet/sync":
                 res = sheetsync.push(conn, self._today())
-                return self._redirect(back, ("Updated: " if res["ok"] else "Not updated: ") + res["detail"], err=not res["ok"])
+                return self._redirect(sheet_back, ("Updated: " if res["ok"] else "Not updated: ") + res["detail"], err=not res["ok"])
             if path == "/sheet/notes":
                 sheetsync.set_notes(conn, form.get("notes") == "1")
-                return self._redirect(back, "Saved")
+                return self._redirect(sheet_back, "Saved")
             if path == "/sheet/unlink":
                 sheetsync.unlink(conn)
-                return self._redirect(back, "Unlinked")
+                return self._redirect(sheet_back, "Unlinked")
             if path == "/seed/dismiss":
                 firstrun.dismiss_notice(conn)
                 return self._redirect("/", "")
@@ -760,6 +762,8 @@ class App:
                 return self._redirect("/goals", "Birth date saved")
         except (ValueError, PermissionError, LookupError, KeyError) as exc:
             conn.rollback()
+            if isinstance(exc, PermissionError) and exc.args and isinstance(exc.args[0], int):      # the operating system refused (error 13), not one of our messages
+                return self._redirect(back, "Windows would not let the app open a file. Close it in other programs (for example Excel) and try again.", err=True)
             return self._redirect(back, str(exc.args[0]) if exc.args else "That did not work.", err=True)
         return _html(404, "<h1>Not found</h1>")
 

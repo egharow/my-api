@@ -107,3 +107,32 @@ def apply_detail(txn: ParsedTxn, detail: str) -> None:
             txn.instalment_full = abs(txn.orig_amount)
     if "הוראת קבע" in txn.detail:
         txn.is_recurring = True
+
+
+_TYPE_WORDS = ("לא הוצג", "תש.נייד", "ה.קבע")
+
+
+def strip_type(text: str) -> tuple[str, str]:
+    """Statements put the kind of charge in front of the merchant ("not shown", "mobile payment", "standing order",
+    or a single letter on foreign charges). Returns (merchant, that kind) so the name is only the merchant."""
+    kinds: list[str] = []
+    s = clean(text)
+    while True:
+        for w in _TYPE_WORDS:
+            if s.startswith(w + " "):
+                kinds.append(w)
+                s = s[len(w):].strip()
+                break
+        else:
+            m = re.match(r"^([אלעט])\s+(?=[A-Za-z0-9#*(\-])", s)            # a lone letter before a Latin or numeric merchant name
+            if m:
+                kinds.append(m.group(1))
+                s = s[m.end():].strip()
+                continue
+            break
+        continue
+    for w in _TYPE_WORDS:                                                  # the same words can also trail the name
+        if s.endswith(" " + w):
+            kinds.append(w)
+            s = s[: -len(w)].strip()
+    return s or clean(text), " ".join(kinds)

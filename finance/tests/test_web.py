@@ -703,3 +703,25 @@ def test_a_new_screen_is_matched_by_section_owner_and_balance(app, conn):
     chosen = {r["label"]: p for r, p in zip(found, picks)}
     assert chosen["מורים תיכוניים"] == (target, "balance")
     assert chosen["מחר השתלמות"][0] != target                                                          # not given twice
+
+
+def test_a_locked_file_in_the_drive_folder_does_not_stop_the_check(app, conn, home, tmp_path, monkeypatch):
+    import os, time
+    from ftracker import importer, watchfolder
+    drive = tmp_path / "locked"; drive.mkdir()
+    for name in ("a.xlsx", "b.xlsx"):
+        f = drive / name
+        f.write_bytes(name.encode())
+        os.utime(f, (time.time() - 60, time.time() - 60))
+    watchfolder.set_folder(conn, home, str(drive))
+
+    def locked(path):
+        raise PermissionError(13, "Permission denied")                     # open in Excel
+    monkeypatch.setattr(importer, "sha256", locked)
+    note = watchfolder.scan(conn, home, force=True)
+    assert "2 could not be opened right now" in note
+    # and a failure that does escape is explained, and sends you back to the Upload page, not to another page
+    monkeypatch.setattr(watchfolder, "scan", lambda *a, **k: (_ for _ in ()).throw(PermissionError(13, "Permission denied")))
+    res = post(app, "/watch/check", {}, headers={"referer": "http://localhost/sheet"})
+    assert dict(res.headers)["Location"] == "/upload"
+    assert "close it in other programs" in _flash(res).lower() or "would not let the app open" in _flash(res)

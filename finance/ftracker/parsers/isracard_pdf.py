@@ -8,7 +8,7 @@ Two kinds of rows exist: shekel purchases (charge column near x=262) and foreign
 import re
 from datetime import date
 
-from .base import ParseError, ParsedFile, ParsedStatement, ParsedTxn, apply_detail, clean, parse_date
+from .base import strip_type, ParseError, ParsedFile, ParsedStatement, ParsedTxn, apply_detail, clean, parse_date
 
 _HEBREW = re.compile(r"[א-ת]")
 _DATE = re.compile(r"^\d{2}/\d{2}/\d{2}$")
@@ -147,7 +147,10 @@ def _row(date_word: dict, band: list[dict], seen: dict) -> ParsedTxn | None:
         apply_detail(t, detail)
     else:
         return None
-    t.description = clean(t.description) or "(no name)"
+    t.description, kind = strip_type(t.description)
+    t.description = t.description or "(no name)"
+    if kind:
+        t.detail = (kind + " " + (t.detail or "")).strip()
     key = (t.txn_date, t.description, round(t.amount, 2))
     seen[key] = seen.get(key, 0) + 1
     t.voucher = f"pdf-{seen[key]}"         # this PDF has no voucher number: the n-th identical line of the day keeps its identity

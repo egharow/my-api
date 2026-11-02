@@ -78,28 +78,32 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
     pictures = 0
     stats = {"files": 0, "known": 0, "syncing": 0, "other": 0}
     for p in sorted(root.iterdir()):
-        if not p.is_file() or p.name.startswith(("~$", ".")):
-            continue
-        if p.suffix.lower() in screens.IMAGE_EXT:                      # a screenshot of your balances: read when you open it
-            if time.time() - p.stat().st_mtime >= SETTLE_SECONDS and screens.safe_name(p.name) and p.stat().st_size <= screens.MAX_BYTES:
-                try:
-                    pictures += screens.pick_up(conn, home, p)
-                except (OSError, ValueError):
-                    pass
-            continue
-        if p.suffix.lower() not in SUPPORTED:
-            stats["other"] += 1
-            continue
-        stats["files"] += 1
-        if time.time() - p.stat().st_mtime < SETTLE_SECONDS:
-            stats["syncing"] += 1
-            continue
-        digest = importer.sha256(p)
-        if digest in seen or conn.execute("SELECT 1 FROM source_files WHERE sha256 = ?", (digest,)).fetchone():
-            stats["known"] += 1
-            continue
-        fresh.append(p)
-        seen.add(digest)
+        try:
+            if not p.is_file() or p.name.startswith(("~$", ".")):
+                continue
+            if p.suffix.lower() in screens.IMAGE_EXT:                      # a screenshot of your balances: read when you open it
+                if time.time() - p.stat().st_mtime >= SETTLE_SECONDS and screens.safe_name(p.name) and p.stat().st_size <= screens.MAX_BYTES:
+                    try:
+                        pictures += screens.pick_up(conn, home, p)
+                    except (OSError, ValueError):
+                        pass
+                continue
+            if p.suffix.lower() not in SUPPORTED:
+                stats["other"] += 1
+                continue
+            stats["files"] += 1
+            if time.time() - p.stat().st_mtime < SETTLE_SECONDS:
+                stats["syncing"] += 1
+                continue
+            digest = importer.sha256(p)
+            if digest in seen or conn.execute("SELECT 1 FROM source_files WHERE sha256 = ?", (digest,)).fetchone():
+                stats["known"] += 1
+                continue
+            fresh.append(p)
+            seen.add(digest)
+        except OSError:                                    # a file Windows will not let us open right now (open in Excel, still downloading)
+            stats["locked"] = stats.get("locked", 0) + 1
+
     pic_msg = f"{pictures} screenshot(s) ready to check" if pictures else ""
     if not fresh:
         if pic_msg:
@@ -112,6 +116,8 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
             parts.append(f"{stats['syncing']} still syncing")
         if stats["other"]:
             parts.append(f"{stats['other']} other file(s) ignored")
+        if stats.get("locked"):
+            parts.append(f"{stats['locked']} could not be opened right now (close it in Excel or wait for Drive to finish, then try again)")
         return "Nothing new: " + ", ".join(parts) + "."
     home.inbox.mkdir(parents=True, exist_ok=True)
     for p in fresh:
@@ -120,7 +126,10 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
         while dest.exists():
             dest = home.inbox / f"{p.stem}-{n}{p.suffix}"
             n += 1
-        shutil.copy2(p, dest)
+        try:
+            shutil.copy2(p, dest)
+        except OSError:
+            continue
     report = importer.import_inbox(home, conn, today or date.today())
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (SEEN_KEY, json.dumps({"v": PARSERS_VERSION, "hashes": sorted(seen)})))
     imported = report.imported

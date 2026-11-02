@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: clean_descriptions, add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -67,6 +67,20 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action == "clean_descriptions":
+        from .normalize import norm_description
+        from .parsers.base import strip_type
+        n = 0
+        for r in conn.execute("SELECT id, description FROM transactions").fetchall():
+            new, kind = strip_type(r["description"])
+            if kind and new != r["description"]:
+                conn.execute("UPDATE transactions SET description = ?, description_norm = ?, detail = TRIM(? || ' ' || COALESCE(detail, '')) WHERE id = ?",
+                             (new, norm_description(new), kind, r["id"]))
+                n += 1
+        conn.commit()
+        categorize.resuggest(conn)
+        conn.commit()
+        return f"{n} payment name(s) cleaned of the charge type"
     if action == "add_account":
         if _account(conn, e["label"]):
             return f"account {e['label']} already exists"

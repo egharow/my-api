@@ -149,3 +149,26 @@ def test_cal_statement_rows_are_read_and_club_points_are_skipped():
     assert (st.issuer, st.last4, st.stated_total) == ("cal", "5962", 124.0) and len(st.txns) == 3
     assert len({t.voucher for t in st.txns}) == 3                                    # two identical purchases on one day stay two lines
     assert st.txns[0].detail.startswith("ענף: מזון מהיר")
+
+
+def test_the_kind_of_charge_is_taken_out_of_the_merchant_name():
+    from ftracker.parsers.base import strip_type
+    assert strip_type("לא הוצג TICKETING ELAL") == ("TICKETING ELAL", "לא הוצג")
+    assert strip_type("תש.נייד מנקאי") == ("מנקאי", "תש.נייד")
+    assert strip_type("ה.קבע HOT BY TV NEXT") == ("HOT BY TV NEXT", "ה.קבע")
+    assert strip_type("א MKTPL*5A1GD MAZON SEATTLE") == ("MKTPL*5A1GD MAZON SEATTLE", "א")
+    assert strip_type("אלה") == ("אלה", "") and strip_type("תלם מרקט") == ("תלם מרקט", "")            # an ordinary name is left alone
+
+
+def test_cleaning_old_payment_names_keeps_the_category(conn, home, tmp_path, monkeypatch):
+    import json
+    from datetime import date
+    from ftracker import datafixes
+    from .helpers import card_file, card_txn, run_import
+    run_import(home, conn, monkeypatch, [("c.xlsx", card_file(last4="7777", txns=[card_txn(date(2026, 9, 3), "לא הוצג TICKETING ELAL", 100.0, "s1")]))])
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([{"id": "z", "action": "clean_descriptions"}]), encoding="utf-8")
+    lines = datafixes.apply(conn, home, app, date(2026, 11, 3))
+    assert "1 payment name(s) cleaned" in lines[0]
+    row = conn.execute("SELECT description, description_norm, detail FROM transactions WHERE voucher = 's1'").fetchone()
+    assert row["description"] == "TICKETING ELAL" and row["description_norm"] == "TICKETING ELAL" and row["detail"].startswith("לא הוצג")
