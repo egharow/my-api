@@ -234,6 +234,7 @@ def import_inbox(home: Home, conn: sqlite3.Connection, today: date | None = None
         if report.batch_id is None:
             cur = conn.execute("INSERT INTO batches (created_at) VALUES (?)", (now(),))
             report.batch_id = cur.lastrowid
+            conn.commit()                         # a later file that fails and rolls back must not take the batch with it
         batch_id = report.batch_id
 
         archived: Path | None = None
@@ -260,15 +261,33 @@ def import_inbox(home: Home, conn: sqlite3.Connection, today: date | None = None
                 _check_statement(conn, batch_id, statement_id, st, label)
             audit(conn, "file_imported", "source_file", sf_id, f"{path.name}: {new} new, {skipped} already known", "import")
             conn.commit()
-        except Exception:
+        except Exception as exc:                  # one bad file must not stop the others
             conn.rollback()
             if archived and archived.exists():
-                archived.unlink()
-            raise
-        path.unlink()
+                try:
+                    archived.unlink()
+                except OSError:
+                    pass
+            from . import errorlog
+            errorlog.record(home, f"importing {path.name}", exc)
+            reason = f"could not be imported ({type(exc).__name__}: {exc})"
+            try:
+                _set_aside(path, home.unrecognised, reason)
+            except OSError:
+                pass
+            report.files.append(FileResult(path.name, "unrecognised", reason))
+            continue
+        try:
+            path.unlink()
+        except OSError:                           # Windows keeps the file for a moment (antivirus, Drive); the next check sets it aside as a duplicate
+            pass
         report.files.append(FileResult(path.name, "imported", f"{parsed.issuer} {parsed.file_kind}",
                                        new, skipped, str(archived.relative_to(home.root))))
 
+    if report.batch_id is not None and not report.imported and batch_id is None:
+        conn.execute("DELETE FROM batches WHERE id = ? AND NOT EXISTS (SELECT 1 FROM transactions WHERE batch_id = batches.id)", (report.batch_id,))
+        conn.commit()
+        report.batch_id = None
     if report.batch_id is not None:
         reconcile.run(conn, report.batch_id, today.isoformat())
     if report.imported:

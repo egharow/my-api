@@ -150,12 +150,64 @@ def match_card_payments(conn: sqlite3.Connection, batch_id: int) -> None:
         dx.auto_resolve(conn, f"no_payment:{s['id']}", "bank payment found")
 
 
-def track_fee_refunds(conn: sqlite3.Connection, today: str, batch_id: int | None = None) -> list[dict]:
-    """Pair each refundable bank fee with a later credit of the same amount; flag late ones."""
-    fees = conn.execute(
+def _unrefunded_fees(conn: sqlite3.Connection):
+    return conn.execute(
         """SELECT * FROM transactions WHERE expects_refund_by IS NOT NULL AND amount < 0
            AND NOT EXISTS (SELECT 1 FROM transactions r WHERE r.refund_of_txn_id = transactions.id)
+           AND NOT EXISTS (SELECT 1 FROM refund_links l WHERE l.fee_id = transactions.id)
            ORDER BY txn_date""").fetchall()
+
+
+def _refund_for(conn: sqlite3.Connection, fee_id: int):
+    return (conn.execute("SELECT * FROM transactions WHERE refund_of_txn_id = ?", (fee_id,)).fetchone()
+            or conn.execute("SELECT c.* FROM refund_links l JOIN transactions c ON c.id = l.credit_id WHERE l.fee_id = ?", (fee_id,)).fetchone())
+
+
+def _match_lump_refunds(conn: sqlite3.Connection) -> None:
+    """One credit that repays several fees at once (for example the sum of a month's channel commissions)."""
+    from itertools import combinations
+    credits = conn.execute(
+        """SELECT * FROM transactions WHERE amount > 0 AND amount <= 150 AND refund_of_txn_id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM refund_links l WHERE l.credit_id = transactions.id) ORDER BY txn_date""").fetchall()
+    for credit in credits:
+        start = (date.fromisoformat(credit["txn_date"]) - timedelta(days=REFUND_SEARCH_DAYS)).isoformat()
+        pool = [f for f in _unrefunded_fees(conn) if f["account_id"] == credit["account_id"] and start <= f["txn_date"] <= credit["txn_date"]][-12:]
+        for size in range(2, min(6, len(pool)) + 1):
+            hit = next((c for c in combinations(pool, size) if abs(sum(-f["amount"] for f in c) - credit["amount"]) < 0.005), None)
+            if hit:
+                for f in hit:
+                    conn.execute("INSERT OR IGNORE INTO refund_links (fee_id, credit_id) VALUES (?, ?)", (f["id"], credit["id"]))
+                conn.execute("UPDATE transactions SET refund_of_txn_id = ? WHERE id = ?", (hit[0]["id"], credit["id"]))
+                break
+
+
+def pair_transfers(conn: sqlite3.Connection) -> int:
+    """A transfer out of one of your bank accounts and the same amount arriving in another within three days are one movement:
+    each side learns the other account, so neither is flagged as 'no destination'."""
+    outs = conn.execute(
+        """SELECT t.* FROM transactions t JOIN accounts a ON a.id = t.account_id
+           WHERE t.kind = 'transfer' AND t.amount < 0 AND t.counterparty_account_id IS NULL AND a.kind = 'bank'""").fetchall()
+    used: set[int] = set()
+    paired = 0
+    for o in outs:
+        cands = conn.execute(
+            """SELECT t.* FROM transactions t JOIN accounts a ON a.id = t.account_id
+               WHERE t.kind = 'transfer' AND t.amount = ? AND t.account_id != ? AND a.kind = 'bank' AND t.counterparty_account_id IS NULL
+                 AND ABS(julianday(t.txn_date) - julianday(?)) <= ?""", (-o["amount"], o["account_id"], o["txn_date"], PAYMENT_WINDOW_DAYS)).fetchall()
+        cands = [c for c in cands if c["id"] not in used]
+        if not cands:
+            continue
+        best = min(cands, key=lambda c: abs((date.fromisoformat(c["txn_date"]) - date.fromisoformat(o["txn_date"])).days))
+        used.add(best["id"])
+        conn.execute("UPDATE transactions SET counterparty_account_id = ? WHERE id = ?", (best["account_id"], o["id"]))
+        conn.execute("UPDATE transactions SET counterparty_account_id = ? WHERE id = ?", (o["account_id"], best["id"]))
+        paired += 1
+    return paired
+
+
+def track_fee_refunds(conn: sqlite3.Connection, today: str, batch_id: int | None = None) -> list[dict]:
+    """Pair each refundable bank fee with a later credit of the same amount (or one credit for several fees); flag late ones."""
+    fees = _unrefunded_fees(conn)
     for fee in fees:
         end = (date.fromisoformat(fee["txn_date"]) + timedelta(days=REFUND_SEARCH_DAYS)).isoformat()
         credit = conn.execute(
@@ -164,6 +216,7 @@ def track_fee_refunds(conn: sqlite3.Connection, today: str, batch_id: int | None
             (fee["account_id"], fee["amount"], fee["txn_date"], end)).fetchone()
         if credit:
             conn.execute("UPDATE transactions SET refund_of_txn_id = ? WHERE id = ?", (fee["id"], credit["id"]))
+    _match_lump_refunds(conn)
     return fee_status(conn, today, batch_id, raise_items=True)
 
 
@@ -171,7 +224,7 @@ def fee_status(conn: sqlite3.Connection, today: str, batch_id: int | None = None
                raise_items: bool = False) -> list[dict]:
     out = []
     for fee in conn.execute("SELECT * FROM transactions WHERE expects_refund_by IS NOT NULL AND amount < 0 ORDER BY txn_date"):
-        refund = conn.execute("SELECT * FROM transactions WHERE refund_of_txn_id = ?", (fee["id"],)).fetchone()
+        refund = _refund_for(conn, fee["id"])
         if refund:
             state = "refunded"
         elif today > fee["expects_refund_by"]:
@@ -235,5 +288,7 @@ def flag_large_and_transfers(conn: sqlite3.Connection, batch_id: int) -> None:
 def run(conn: sqlite3.Connection, batch_id: int, today: str) -> None:
     match_card_payments(conn, batch_id)
     track_fee_refunds(conn, today, batch_id)
+    pair_transfers(conn)
     flag_large_and_transfers(conn, batch_id)
+    resolve_stale(conn)
     conn.commit()

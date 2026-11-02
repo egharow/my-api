@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_recurring, views_screens, views_setup, views_sim, views_trips, views_year, views_trends
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_sim, views_trips, views_year, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -203,6 +203,10 @@ class App:
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
             return _html(200, views_home.wealth_page(conn, ctx, q))
+        if path == "/files":
+            return _html(200, views_files.files_page(conn, ctx))
+        if path == "/favicon.ico":
+            return Response(204, b"", [("Cache-Control", "max-age=86400")])
         if path == "/screens":
             return _html(200, views_screens.list_page(conn, ctx, self.home))
         if path.startswith("/screen/"):
@@ -767,8 +771,13 @@ class App:
         except (ValueError, PermissionError, LookupError, KeyError) as exc:
             conn.rollback()
             if isinstance(exc, PermissionError) and exc.args and isinstance(exc.args[0], int):      # the operating system refused (error 13), not one of our messages
-                return self._redirect(back, "Windows would not let the app open a file. Close it in other programs (for example Excel) and try again.", err=True)
+                errorlog.record(self.home, f"{path}", exc)
+                return self._redirect(back, errorlog.describe(exc), err=True)
             return self._redirect(back, str(exc.args[0]) if exc.args else "That did not work.", err=True)
+        except Exception as exc:                          # anything unexpected: say what it was, keep the details, stay on the page you were on
+            conn.rollback()
+            errorlog.record(self.home, f"{path}", exc)
+            return self._redirect(back, errorlog.describe(exc) + " (details are in error-log.txt in your data folder)", err=True)
         return _html(404, "<h1>Not found</h1>")
 
 

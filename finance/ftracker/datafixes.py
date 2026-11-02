@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: set_card_basis, clean_descriptions, add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: card_payer, transfer_rule, incoming_from, set_card_basis, clean_descriptions, add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -67,6 +67,30 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action in ("incoming_from", "transfer_rule"):
+        from .normalize import norm_description
+        acct = _account(conn, e["account"])
+        cat = conn.execute("SELECT id FROM categories WHERE name = ?", (e.get("category", "Internal transfer"),)).fetchone()
+        if not acct or not cat:
+            return f"skipped: no account {e['account']} or category"
+        pat = norm_description(e["pattern"])
+        direction = e.get("direction", "in" if action == "incoming_from" else None)
+        conn.execute("DELETE FROM rules WHERE source = 'user' AND pattern = ? AND COALESCE(direction, '') = ?", (pat, direction or ""))
+        conn.execute("""INSERT INTO rules (source, pattern, direction, account_kind, category_id, set_kind, counterparty_account_id, auto_approve, priority, note, created_at)
+                        VALUES ('user', ?, ?, 'bank', ?, 'transfer', ?, 1, ?, ?, ?)""",
+                     (pat, direction, cat["id"], acct[0], 1000 + len(pat), f"transfers with {e['account']}", date.today().isoformat()))
+        sign = {"in": "AND amount > 0", "out": "AND amount < 0"}.get(direction, "")
+        n = conn.execute(f"UPDATE transactions SET counterparty_account_id = ? WHERE description_norm LIKE ? {sign} AND kind = 'transfer'",
+                         (acct[0], f"%{pat}%")).rowcount
+        categorize.apply_rules_to_proposed(conn)
+        conn.commit()
+        return f"transfers matching {e['pattern']} are marked as with {e['account']} ({n} lines)"
+    if action == "card_payer":
+        card, payer = _account(conn, e["card"]), _account(conn, e["payer"])
+        if not card or not payer:
+            return f"skipped: no account {e['card']} or {e['payer']}"
+        accounts.set_card_payer(conn, card[0], str(payer[0]))
+        return f"{e['card']} is paid from {e['payer']}"
     if action == "set_card_basis":
         from . import booking
         n = booking.set_basis(conn, e["basis"])

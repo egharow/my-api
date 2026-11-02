@@ -750,3 +750,60 @@ def test_a_new_import_follows_the_chosen_month(home, conn, monkeypatch):
     booking.set_basis(conn, "purchase")
     run_import(home, conn, monkeypatch, [("p.xlsx", card_file(last4="8888", billing=date(2026, 10, 2), txns=[card_txn(date(2026, 9, 28), "SHOP", 10.0, "pp1")]))])
     assert conn.execute("SELECT budget_month FROM transactions WHERE voucher = 'pp1'").fetchone()[0] == "2026-09"
+
+
+def test_one_credit_can_repay_several_bank_fees_and_matching_transfers_find_each_other(home, conn, monkeypatch):
+    from datetime import date
+    from ftracker import reconcile
+    from .helpers import bank_file, run_import
+    rows = [(date(2026, 1, 1), "עמל.ערוץ יש 5", -8.25), (date(2026, 1, 1), "עמלות פקיד 1", -5.5), (date(2026, 1, 2), "מענק בנק לאומי", 13.75),
+            (date(2026, 1, 5), "העברה דיגיטל", -1000.0)]
+    run_import(home, conn, monkeypatch, [("a.pdf", bank_file(rows, last4="1111"))])
+    other = bank_file([(date(2026, 1, 6), "העברה דיגיטל", 1000.0)], last4="2222", start=date(2026, 1, 1), end=date(2026, 1, 31))
+    run_import(home, conn, monkeypatch, [("b.pdf", other)])
+    reconcile.track_fee_refunds(conn, "2026-03-01")
+    assert all(f["state"] == "refunded" for f in reconcile.fee_status(conn, "2026-03-01"))            # two fees, one credit of their sum
+    n = conn.execute("SELECT COUNT(*) FROM transactions WHERE kind = 'transfer' AND counterparty_account_id IS NOT NULL").fetchone()[0]
+    reconcile.pair_transfers(conn)
+    paired = conn.execute("SELECT COUNT(*) FROM transactions WHERE kind = 'transfer' AND counterparty_account_id IS NOT NULL").fetchone()[0]
+    assert paired >= n and paired in (0, 2)                    # both sides learn each other, or neither were transfers by rule
+
+
+def test_a_broken_file_does_not_stop_the_other_files_and_errors_are_explained(home, conn, monkeypatch):
+    from ftracker import errorlog, importer
+    from .helpers import card_file
+    (home.inbox / "a.xlsx").write_bytes(b"first")
+    (home.inbox / "b.xlsx").write_bytes(b"second")
+    monkeypatch.setattr(importer, "parse_file", lambda path: card_file(last4="1111" if path.name == "a.xlsx" else "2222"))
+    real = importer.ensure_account
+
+    def boom(c, st):
+        if st.last4 == "1111":
+            raise RuntimeError("something odd in this file")
+        return real(c, st)
+    monkeypatch.setattr(importer, "ensure_account", boom)
+    rep = importer.import_inbox(home, conn)
+    by = {f.name: f.status for f in rep.files}
+    assert by == {"a.xlsx": "unrecognised", "b.xlsx": "imported"}                           # reported, and the other file still went in
+    assert "something odd" in (home.root / "error-log.txt").read_text(encoding="utf-8")
+    assert not (home.inbox / "a.xlsx").exists()                                               # set aside, not retried forever
+    assert "error 13" in errorlog.describe(PermissionError(13, "Permission denied", "G:\\x.xlsx")) and "x.xlsx" in errorlog.describe(PermissionError(13, "d", "G:\\x.xlsx"))
+    assert errorlog.describe(KeyError(13)).endswith("13")
+
+
+def test_favicon_does_not_error(app):
+    assert get(app, "/favicon.ico").status == 204
+
+
+def test_any_unexpected_error_in_a_button_stays_on_the_page_with_the_real_reason(app, home, monkeypatch):
+    from ftracker import watchfolder
+    monkeypatch.setattr(watchfolder, "scan", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("disk exploded")))
+    res = post(app, "/watch/check", {})
+    assert dict(res.headers)["Location"] == "/upload" and "disk exploded" in _flash(res) and "error-log.txt" in _flash(res)
+    assert "disk exploded" in (home.root / "error-log.txt").read_text(encoding="utf-8")
+
+
+def test_the_files_page_shows_each_statement_with_its_account_dates_and_months(app):
+    page = text(get(app, "/files"))
+    assert "Where every file went" in page and "adds up" in page and "Counted in" in page
+    assert "/files" in text(get(app, "/upload"))

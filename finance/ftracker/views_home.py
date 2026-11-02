@@ -130,7 +130,7 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     nxt = (f'<p><a href="/review"><button>Next: confirm {c["review"]} categories</button></a></p>' if c["review"] else
            '<p><a href="/"><button class="quiet">Back to this round</button></a></p>')
     from .views import sheet_body
-    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}{shots}<section class="card">{head}{render_checklist(cl)}</section>{render_history(expected.history(conn, ctx.today))}'
+    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}{shots}<p class="cap"><a href="/files">See where every file went</a></p><section class="card">{head}{render_checklist(cl)}</section>{render_history(expected.history(conn, ctx.today))}'
             f'<div style="margin-top:12px">{nxt}</div>'
             f'<section style="margin-top:24px"><h2>Google Sheet (optional)</h2>{sheet_body(conn, ctx, "/upload")}</section>')
     return layout(conn, ctx, "/upload", "Upload", body)
