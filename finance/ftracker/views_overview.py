@@ -151,6 +151,8 @@ def _tasks(conn: sqlite3.Connection, ctx: Ctx) -> str:
         chips.append(f'<a class="chip" href="/review"><b>{c["review"]}</b> payments to sort</a>')
     if pend:
         chips.append(f'<a class="chip" href="/balances"><b>{len(pend)}</b> balances to update</a>')
+    if ctx.screens_waiting:
+        chips.append(f'<a class="chip" href="/screen/{esc(ctx.screens_waiting[0])}"><b>{len(ctx.screens_waiting)}</b> balance screenshot(s) to check</a>')
     if c["items"]:
         chips.append(f'<a class="chip" href="/items"><b>{c["items"]}</b> to check</a>')
     if drafts:

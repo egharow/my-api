@@ -29,9 +29,9 @@ document.addEventListener('dragover',function(e){e.preventDefault()});document.a
 def dropzone(ctx: Ctx, compact: bool = False) -> str:
     style = "padding:14px" if compact else "padding:34px"
     return (f'<div class="card drop" id="drop" data-csrf="{esc(ctx.csrf)}" style="{style};text-align:center;border-style:dashed;margin-bottom:16px">'
-            '<b>Drop statements here</b><div class="muted">card exports (.xlsx, .xls) and bank statements (.pdf), or '
+            '<b>Drop statements here</b><div class="muted">card exports (.xlsx, .xls), bank statements (.pdf) and screenshots of your balances, or '
             '<label style="color:var(--accent);cursor:pointer;text-decoration:underline">choose files'
-            '<input type="file" id="pick" multiple accept=".xlsx,.xls,.pdf" hidden></label></div></div>'
+            '<input type="file" id="pick" multiple accept=".xlsx,.xls,.pdf,.png,.jpg,.jpeg,.webp,.bmp" hidden></label></div></div>'
             f'<form id="importform" method="post" action="/import"><input type="hidden" name="csrf" value="{esc(ctx.csrf)}"></form>'
             f"<script>{DROP_JS}</script>")
 

@@ -29,6 +29,7 @@ class Ctx:
     phone_anywhere: str = ""
     closed: frozenset = frozenset()  # months you closed
     tags: tuple = ()                 # (id, name) of your trips and tags
+    screens_waiting: tuple = ()      # balance screenshots waiting to be checked
 
 
 CSS = """
@@ -647,8 +648,7 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                     f'<td>{esc(l["as_of"]) if l else ""}{" ▲ old" if stale else ""}</td>'
                     f'<td><input name="bal_{a["id"]}" inputmode="decimal" size="12" placeholder="new value"> {esc(a["currency"])}</td>'
                     + (f'<td><label class="cap"><input type="checkbox" name="same_{a["id"]}" value="1"> same</label></td>' if l else "<td></td>") + '</tr>')
-    banner = (f'<div class="banner">Balances are due{" (last updated " + esc(last) + ")" if last else ""}. <a href="/screens">Update them from a screenshot</a></div>' if due else
-              '<p><a class="btnlink" href="/screens">Update balances from a screenshot</a></p>')
+    banner = (f'<div class="banner">Balances are due{" (last updated " + esc(last) + ")" if last else ""}.</div>' if due else "")
     kinds = "".join(f"<option>{k}</option>" for k in ("bank", "investment", "pension", "savings", "real_estate", "loan", "other"))
     owner_opts = '<option value="">(none)</option>' + "".join(f"<option>{esc(o)}</option>" for o in ctx.owners)
     form = _form(ctx, "/balances",

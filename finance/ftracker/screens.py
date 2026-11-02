@@ -42,8 +42,18 @@ def done(conn: sqlite3.Connection) -> set[str]:
 
 
 def mark_done(conn: sqlite3.Connection, path: Path) -> None:
+    """The picture is dealt with: remember it (so the same file in your folder is not picked up again) and put it away."""
+    import shutil
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (DONE_KEY, json.dumps(sorted(done(conn) | {sha(path)})[-500:])))
     conn.commit()
+    away = path.parent / "done"
+    away.mkdir(exist_ok=True)
+    target = away / path.name
+    n = 2
+    while target.exists():
+        target = away / f"{path.stem}-{n}{path.suffix}"
+        n += 1
+    shutil.move(str(path), str(target))
 
 
 def save_upload(home: Home, name: str, data: bytes) -> str:
@@ -61,27 +71,19 @@ def save_upload(home: Home, name: str, data: bytes) -> str:
     return dest.name
 
 
-def waiting(conn: sqlite3.Connection, home: Home, watch_folder: str | None) -> dict:
-    """Pictures you added here that were not used yet, and pictures sitting in your watched folder."""
-    gone = done(conn)
-    mine = [p for p in sorted(dir_of(home).iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if p.suffix.lower() in IMAGE_EXT and sha(p) not in gone]
-    drive = []
-    if watch_folder and Path(watch_folder).is_dir():
-        have = {sha(p) for p in dir_of(home).iterdir() if p.suffix.lower() in IMAGE_EXT}
-        for p in sorted(Path(watch_folder).iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
-            if p.is_file() and p.suffix.lower() in IMAGE_EXT and safe_name(p.name):
-                h = sha(p)
-                if h not in gone and h not in have:
-                    drive.append(p.name)
-    return {"mine": [p.name for p in mine], "drive": drive[:30]}
+def waiting_names(home: Home) -> list[str]:
+    """Pictures that came in (from your folder or the Upload page) and have not been checked yet, newest first."""
+    d = dir_of(home)
+    return [p.name for p in sorted((p for p in d.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXT), key=lambda p: p.stat().st_mtime, reverse=True)]
 
 
-def take_from_folder(home: Home, watch_folder: str, name: str) -> str:
-    clean = safe_name(name)
-    src = Path(watch_folder) / (clean or "")
-    if not clean or not src.is_file():
-        raise ValueError("That picture was not found in your folder.")
-    return save_upload(home, clean, src.read_bytes())
+def pick_up(conn: sqlite3.Connection, home: Home, src: Path) -> bool:
+    """Copy a picture from your watched folder, unless it was handled before. True when it is new."""
+    h = sha(src)
+    if h in done(conn) or any(sha(p) == h for p in dir_of(home).iterdir() if p.is_file()):
+        return False
+    save_upload(home, src.name, src.read_bytes())
+    return True
 
 
 # ---- reading the amounts -------------------------------------------------------------------------------

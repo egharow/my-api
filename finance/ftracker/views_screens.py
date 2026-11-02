@@ -20,35 +20,24 @@ def _accounts(conn: sqlite3.Connection, today: str):
 
 
 def list_page(conn: sqlite3.Connection, ctx: Ctx, home: Home) -> str:
-    wait = screens.waiting(conn, home, watchfolder.get(conn))
+    names = screens.waiting_names(home)
     ready, why = ocr.status()
     reader = ('<p class="chip good"><b>✔</b> Text recognition is on</p>' if ready else
               f'<p class="muted">Text recognition: {esc(why)}</p>'
               + (_form(ctx, "/screens/install", '<button>Turn on text recognition</button> <span class="cap">One-time download of about 10 MB. Needs the internet.</span>', "row")
                  if ocr.sys.platform == "win32" else ""))
-    mine = "".join(f'<div class="srcrow"><span dir="auto">{esc(n)}</span><span><a class="btnlink" href="/screen/{esc(n)}">Read it</a></span></div>' for n in wait["mine"])
-    drive = "".join(f'<div class="srcrow"><span dir="auto">{esc(n)}</span>'
-                    + _form(ctx, "/screens/take", f'<input type="hidden" name="name" value="{esc(n)}"><button class="quiet">Read it</button>', "inline") + "</div>"
-                    for n in wait["drive"])
-    js = ("(function(){var f=document.getElementById('shotfile'),csrf=f.getAttribute('data-csrf');f.addEventListener('change',function(){"
-          "if(!f.files.length)return;var fd=new FormData();for(var i=0;i<f.files.length;i++)fd.append('file',f.files[i]);"
-          "fetch('/screens/upload',{method:'POST',headers:{'X-CSRF':csrf},body:fd}).then(function(r){return r.json()}).then(function(j){"
-          "if(j.error){alert(j.error)}else if(j.saved&&j.saved.length){location.href='/screen/'+encodeURIComponent(j.saved[0])}else{location.reload()}})})})();")
-    body = ('<h1>Balances from a screenshot</h1><p class="muted">Add a screenshot of your balances, for example from the One Zero wealth screen. '
-            'The app reads the numbers and shows them next to the picture. Nothing is saved until you approve it.</p>'
-            f'<div class="card">{reader}<p><label class="btnlink" style="cursor:pointer">Choose a screenshot<input id="shotfile" type="file" accept="image/*" multiple hidden '
-            f'data-csrf="{esc(ctx.csrf)}"></label></p></div>'
-            + (f'<div class="card" style="margin-top:14px"><h2>Waiting</h2>{mine}</div>' if mine else "")
-            + (f'<div class="card" style="margin-top:14px"><h2>Pictures in your Drive folder</h2>{drive}</div>' if drive else "")
-            + f"<script>{js}</script>")
-    return layout(conn, ctx, "/balances", "Balances from a screenshot", body)
+    rows = "".join(f'<div class="srcrow"><span dir="auto">{esc(n)}</span><span><a class="btnlink" href="/screen/{esc(n)}">Check it</a></span></div>' for n in names)
+    body = ('<h1>Balance screenshots</h1><p class="muted">Save a screenshot of your balances in the same Drive folder as your statements, or drop it on the Upload page. '
+            'It shows up in your to-do list. The numbers are read, shown beside the picture, and saved only when you approve them.</p>'
+            f'<div class="card">{reader}</div><div class="card" style="margin-top:14px"><h2>Waiting for you</h2>{rows or "<p class=muted>None.</p>"}</div>')
+    return layout(conn, ctx, "/screens", "Balance screenshots", body)
 
 
 def review_page(conn: sqlite3.Connection, ctx: Ctx, home: Home, name: str) -> str:
     safe = screens.safe_name(name)
     path = screens.dir_of(home) / (safe or "")
     if not safe or not path.is_file():
-        return layout(conn, ctx, "/balances", "Screenshot", '<h1>Not found</h1><p><a href="/screens">Back</a></p>')
+        return layout(conn, ctx, "/screens", "Screenshot", '<h1>Not found</h1><p><a href="/screens">Back</a></p>')
     words, note = ocr.read_words(path)
     found = screens.extract(words) if words else []
     accts = _accounts(conn, ctx.today)
@@ -79,7 +68,7 @@ def review_page(conn: sqlite3.Connection, ctx: Ctx, home: Home, name: str) -> st
                  '<p class="row" style="margin-top:12px"><button>Approve and save the ticked balances</button> '
                  f'<button class="quiet" formaction="/screens/skip">Not now, I am done with this picture</button></p>')
     notice = f'<p class="banner">{esc(note)}</p>' if note else ""
-    return layout(conn, ctx, "/balances", "Screenshot",
+    return layout(conn, ctx, "/screens", "Screenshot",
                   f'<p><a href="/screens">← Screenshots</a></p><h1>Check the numbers against the picture</h1>{notice}'
                   f'<div class="shotgrid"><div class="shotimg"><a href="/screens/file/{esc(safe)}" target="_blank" rel="noopener">'
                   f'<img src="/screens/file/{esc(safe)}" alt="Your screenshot"></a><p class="cap">Click the picture to open it larger.</p></div>'

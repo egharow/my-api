@@ -643,14 +643,34 @@ def test_a_screenshot_is_read_shown_beside_the_picture_and_saved_only_on_approva
     assert "not a number" in _flash(post(app, "/screens/approve", {"image": name, "n": "1", "r0_on": "1", "r0_amount": "x", "r0_account": str(acct)}))
 
 
-def test_images_in_the_drive_folder_are_offered_and_only_pictures_are_accepted(app, conn, home, tmp_path):
+def test_screenshots_in_the_drive_folder_arrive_by_themselves_like_statements(app, conn, home, tmp_path, monkeypatch):
+    import os, time
     from ftracker import screens, watchfolder
     drive = tmp_path / "d"; drive.mkdir()
-    (drive / "balances.png").write_bytes(b"x1"); (drive / "notes.txt").write_text("no")
+    pic = drive / "balances.png"
+    pic.write_bytes(b"x1"); (drive / "notes.txt").write_text("no")
+    old = time.time() - 60
+    os.utime(pic, (old, old))
     watchfolder.set_folder(conn, home, str(drive))
-    assert "balances.png" in text(get(app, "/screens")) and "notes.txt" not in text(get(app, "/screens"))
-    res = post(app, "/screens/take", {"name": "balances.png"})
-    assert dict(res.headers)["Location"].startswith("/screen/")
+    note = watchfolder.scan(conn, home, force=True)
+    assert "1 screenshot(s) ready to check" in note
+    assert screens.waiting_names(home) == ["balances.png"]
+    assert watchfolder.scan(conn, home, force=True).startswith("Nothing new") or screens.waiting_names(home) == ["balances.png"]    # not picked up twice
+    assert len(screens.waiting_names(home)) == 1
+    assert "balance screenshot(s) to check" in text(get(app, "/"))                       # in the to-do list, like statements
+    assert "balance screenshot(s) to check" in text(get(app, "/upload"))
+    # it is read and approved on the side-by-side page, and then it is gone and is not picked up again
+    res = post(app, "/screens/skip", {"image": "balances.png"})
+    assert screens.waiting_names(home) == [] and (home.root / "screens" / "done" / "balances.png").exists()
+    watchfolder.scan(conn, home, force=True)
+    assert screens.waiting_names(home) == []
     import pytest
     with pytest.raises(ValueError):
         screens.save_upload(home, "evil.exe", b"abc")
+
+
+def test_a_screenshot_dropped_on_the_upload_page_joins_the_to_do_list(app, home):
+    from ftracker import screens
+    body = (b"--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"s.png\"\r\nContent-Type: image/png\r\n\r\nPNGDATA\r\n--B--\r\n")
+    res = app.handle("POST", "/upload", {**H, "content-type": "multipart/form-data; boundary=B", "x-csrf": app.csrf}, body)
+    assert res.status == 200 and screens.waiting_names(home) == ["s.png"]

@@ -127,7 +127,7 @@ class App:
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
                             data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS,
-                            readonly=remote and self.phone, closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)))
+                            readonly=remote and self.phone, closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)), screens_waiting=tuple(screens.waiting_names(self.home)))
             ph = conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone()
             if ph and conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone():
                 ip = appmode.lan_address()
@@ -281,7 +281,18 @@ class App:
                     errors.append(str(exc))
             return self._json(200 if saved else 400, {"saved": saved, "error": "; ".join(errors)} if errors else {"saved": saved})
         if path == "/upload":
+            pics = [fl for fl in files if Path(fl.name).suffix.lower() in screens.IMAGE_EXT]
+            files = [fl for fl in files if fl not in pics]
+            seen_pics = []
+            for fl in pics:
+                try:
+                    seen_pics.append(screens.save_upload(self.home, fl.name, fl.data))
+                except ValueError:
+                    pass
+            if pics and not files:
+                return self._json(200, {"saved": [f"{n} (screenshot, see your to-do list)" for n in seen_pics], "rejected": []})
             saved, rejected = uploads.save_to_inbox(files, self.home.inbox)
+            saved += [f"{n} (screenshot, see your to-do list)" for n in seen_pics]
             return self._json(200, {"saved": saved, "rejected": rejected})
         f = files[0]
         if not f.name.lower().endswith(".xlsx"):
@@ -585,19 +596,12 @@ class App:
             if path == "/screens/install":
                 ok, log = ocr.install()
                 return self._redirect("/screens", "Text recognition is on." if ok else "It could not be installed: " + log[-160:], err=not ok)
-            if path == "/screens/take":
-                folder = watchfolder.get(conn)
-                try:
-                    name = screens.take_from_folder(self.home, folder or "", form.get("name", ""))
-                except ValueError as exc:
-                    return self._redirect("/screens", str(exc), err=True)
-                return self._redirect("/screen/" + quote(name))
             if path == "/screens/skip":
                 name = screens.safe_name(form.get("image", ""))
                 f = screens.dir_of(self.home) / (name or "")
                 if name and f.is_file():
                     screens.mark_done(conn, f)
-                return self._redirect("/screens", "Left as it is.")
+                return self._redirect("/", "Left as it is.")
             if path == "/screens/approve":
                 name = screens.safe_name(form.get("image", ""))
                 f = screens.dir_of(self.home) / (name or "")
@@ -617,7 +621,7 @@ class App:
                 n = screens.approve(conn, rows, form.get("as_of") or self._today())
                 if name and f.is_file():
                     screens.mark_done(conn, f)
-                return self._redirect("/balances", f"{n} balance(s) saved from the screenshot")
+                return self._redirect("/", f"{n} balance(s) saved from the screenshot")
             if path == "/alerts/dismiss":
                 alerts.dismiss(conn, form.get("id", ""))
                 return self._redirect("/alerts", "Dismissed")

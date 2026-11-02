@@ -10,7 +10,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import importer
+from . import importer, screens
 from .parsers.detect import PARSERS_VERSION
 from .config import Home
 
@@ -75,9 +75,17 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
         return msg
     seen = set() if force else _seen(conn)       # "Check it now" tries everything not yet imported
     fresh: list[Path] = []
+    pictures = 0
     stats = {"files": 0, "known": 0, "syncing": 0, "other": 0}
     for p in sorted(root.iterdir()):
         if not p.is_file() or p.name.startswith(("~$", ".")):
+            continue
+        if p.suffix.lower() in screens.IMAGE_EXT:                      # a screenshot of your balances: read when you open it
+            if time.time() - p.stat().st_mtime >= SETTLE_SECONDS and screens.safe_name(p.name) and p.stat().st_size <= screens.MAX_BYTES:
+                try:
+                    pictures += screens.pick_up(conn, home, p)
+                except (OSError, ValueError):
+                    pass
             continue
         if p.suffix.lower() not in SUPPORTED:
             stats["other"] += 1
@@ -92,7 +100,11 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
             continue
         fresh.append(p)
         seen.add(digest)
+    pic_msg = f"{pictures} screenshot(s) ready to check" if pictures else ""
     if not fresh:
+        if pic_msg:
+            _save(conn, pic_msg)
+            return pic_msg
         if not force:
             return ""
         parts = [f"{stats['files']} statement file(s) in the folder", f"{stats['known']} already imported"]
@@ -116,6 +128,8 @@ def scan(conn: sqlite3.Connection, home: Home, today: date | None = None, force:
     msg = f"{len(imported)} new statement(s) imported from your folder"
     if bad:
         msg += f"; {len(bad)} not recognised ({', '.join(f.name for f in bad[:3])})"
+    if pic_msg:
+        msg += "; " + pic_msg
     _save(conn, msg)
     return msg
 

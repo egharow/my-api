@@ -125,10 +125,12 @@ def upload_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     watch = (f'<p class="muted">Also picking up statements from <code>{esc(folder)}</code>. ' + _form(ctx, "/watch/check", '<button class="quiet">Check it now</button>', "inline") + "</p>"
              if folder else '<p class="muted">Tip: statements saved to a Google Drive folder can be picked up automatically. '
              '<a href="/setup">Set it up in Settings</a>.</p>')
+    shots = (f'<div class="banner"><b>{len(ctx.screens_waiting)} balance screenshot(s) to check.</b> '
+             f'<a href="/screen/{esc(ctx.screens_waiting[0])}">Open the first one</a></div>' if ctx.screens_waiting else "")
     nxt = (f'<p><a href="/review"><button>Next: confirm {c["review"]} categories</button></a></p>' if c["review"] else
            '<p><a href="/"><button class="quiet">Back to this round</button></a></p>')
     from .views import sheet_body
-    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}<section class="card">{head}{render_checklist(cl)}</section>{render_history(expected.history(conn, ctx.today))}'
+    body = (f'<h1>Upload</h1>{dropzone(ctx, compact=True)}{watch}{shots}<section class="card">{head}{render_checklist(cl)}</section>{render_history(expected.history(conn, ctx.today))}'
             f'<div style="margin-top:12px">{nxt}</div>'
             f'<section style="margin-top:24px"><h2>Google Sheet (optional)</h2>{sheet_body(conn, ctx, "/upload")}</section>')
     return layout(conn, ctx, "/upload", "Upload", body)
@@ -158,4 +160,4 @@ def wealth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         + '<p class="cap">The goal counts your total net worth and shows as a red line on the chart. For one account only, use <a href="/goals">Goals</a>. '
           'Try different returns in the <a href="/simulator">simulator</a>.</p></details>')
     goals_html = f'<section class="card" style="margin-top:16px"><h2>Goals <small><a href="/goals">all options</a></small></h2>{cards or "<p class=muted>No goals yet.</p>"}{add}</section>'
-    return layout(conn, ctx, "/wealth", "Wealth", f'<h1>Wealth</h1><p><a class="btnlink" href="/simulator">Simulate the future</a> <a class="btnlink" href="/screens">Update balances from a screenshot</a></p>{body}{goals_html}')
+    return layout(conn, ctx, "/wealth", "Wealth", f'<h1>Wealth</h1><p><a class="btnlink" href="/simulator">Simulate the future</a></p>{body}{goals_html}')
