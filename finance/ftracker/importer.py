@@ -13,6 +13,7 @@ from pathlib import Path
 from . import categorize, reconcile
 from . import discrepancies as dx
 from .archive import plan_path
+from . import booking
 from .backup import make_backup, prune
 from .config import Home
 from .db import audit, now
@@ -124,6 +125,7 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
         statement_id = cur.lastrowid
 
     new = skipped = 0
+    chosen = booking.basis(conn)
     for t in st.txns:
         if st.account_kind == "bank" and t.balance_after is not None and conn.execute(
                 "SELECT 1 FROM transactions WHERE account_id = ? AND txn_date = ? AND amount = ? AND balance_after = ?",
@@ -132,7 +134,8 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
             continue
         key = _dedupe_key(account_id, st.account_kind, t, st.billing_date)
         # Cards book into the month they are billed; the purchase date is kept alongside.
-        month_basis = st.billing_date or t.txn_date
+        month_basis = (booking.month_for(chosen, t.txn_date.isoformat(), st.billing_date and st.billing_date.isoformat(), t.instalment_total)
+                       if st.account_kind == "card" else (st.billing_date or t.txn_date).isoformat())
         try:
             cur = conn.execute(
                 """INSERT INTO transactions
@@ -142,7 +145,7 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
                     instalment_full, created_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (batch_id, account_id, statement_id, key, t.txn_date.isoformat(),
-                 st.billing_date and st.billing_date.isoformat(), month_basis.strftime("%Y-%m"),
+                 st.billing_date and st.billing_date.isoformat(), month_basis[:7],
                  t.description, norm_description(t.description), t.detail, t.amount, t.currency,
                  t.orig_amount, t.orig_currency,
                  (t.amount / t.orig_amount) if t.orig_amount and t.orig_currency != t.currency else None,

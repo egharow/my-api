@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_recurring, views_screens, views_setup, views_sim, views_trips, views_year, views_trends
+from . import alerts, appmode, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_overview, views_recurring, views_screens, views_setup, views_sim, views_trips, views_year, views_trends
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -624,6 +624,10 @@ class App:
                 if name and f.is_file():
                     screens.mark_done(conn, f)
                 return self._redirect("/", f"{n} balance(s) saved from the screenshot")
+            if path == "/setting/card-basis":
+                n = booking.set_basis(conn, form.get("basis", ""))
+                return self._redirect(form.get("next") if form.get("next") in ("/", "/setup") else "/setup",
+                                      f"Card purchases now count in the month {'you bought them' if form['basis'] == 'purchase' else 'the card is billed'}. {n} payment(s) moved.")
             if path == "/alerts/dismiss":
                 alerts.dismiss(conn, form.get("id", ""))
                 return self._redirect("/alerts", "Dismissed")

@@ -3,7 +3,7 @@ import sqlite3
 from html import escape as esc
 from pathlib import Path
 
-from . import categorize, charts, cloudbackup, sheet_import, watchfolder
+from . import booking, categorize, charts, cloudbackup, sheet_import, watchfolder
 from .config import Home
 from .views import Ctx, _form, layout
 
@@ -269,6 +269,15 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                   + _form(ctx, "/watch/clear", '<button class="quiet">Stop watching</button>', "inline") if folder else "")
                + _form(ctx, "/watch/set", f'<input name="folder" style="width:100%;max-width:520px" placeholder="G:\\My Drive\\Statements" '
                        f'value="{esc(folder or "")}" required> <button>{"Change folder" if folder else "Watch this folder"}</button>', "row") + "</section>")
+    chosen = booking.basis(conn)
+    out.append('<section class="card" style="margin-top:12px"><h2>Which month a card purchase counts in</h2>'
+               '<p class="muted">A purchase made in September is billed in October. Choose where it shows up in your numbers.</p>'
+               + _form(ctx, "/setting/card-basis",
+                       f'<label style="display:block"><input type="radio" name="basis" value="purchase"{" checked" if chosen == "purchase" else ""}> '
+                       '<b>The month I bought it.</b> Each month shows what you spent in it. The latest month fills in as card statements arrive.</label>'
+                       f'<label style="display:block"><input type="radio" name="basis" value="billing"{" checked" if chosen == "billing" else ""}> '
+                       '<b>The month the card is billed.</b> Matches what left your bank account that month.</label>'
+                       '<p><button>Save</button> <span class="cap">Payments in instalments always count in the month each instalment is billed.</span></p>', "") + "</section>")
     out.append(_backup_card(conn, ctx))
     shortcut = (_form(ctx, "/setup/shortcut", "<button>Put an icon on my desktop</button>", "inline") if ctx.can_shortcut else "")
     out.append('<section class="card" style="margin-top:12px"><h2>This app</h2>'

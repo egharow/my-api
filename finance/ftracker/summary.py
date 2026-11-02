@@ -128,12 +128,14 @@ def daily_spending(conn: sqlite3.Connection, month: str, owner: str | None = Non
     if owner:
         where.append("o.name = ?")
         args.append(owner)
+    from . import booking
+    purchase = booking.basis(conn) == "purchase"
     last = calendar.monthrange(int(month[:4]), int(month[5:7]))[1]
     out: dict[int, float] = {}
     for r in conn.execute(
-            f"""SELECT COALESCE(t.billing_date, t.txn_date) AS d, -t.amount AS spent
+            f"""SELECT CASE WHEN ? AND substr(t.txn_date, 1, 7) = t.budget_month THEN t.txn_date ELSE COALESCE(t.billing_date, t.txn_date) END AS d, -t.amount AS spent
                 FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
-                LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)}""", args):
+                LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)}""", [1 if purchase else 0, *args]):
         d = r["d"]
         day = int(d[8:10]) if d[:7] == month else (1 if d[:7] < month else last)
         out[day] = round(out.get(day, 0.0) + r["spent"], 2)

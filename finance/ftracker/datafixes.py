@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: clean_descriptions, add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: set_card_basis, clean_descriptions, add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -67,6 +67,10 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action == "set_card_basis":
+        from . import booking
+        n = booking.set_basis(conn, e["basis"])
+        return f"card purchases now count in the month of {'purchase' if e['basis'] == 'purchase' else 'billing'} ({n} moved)"
     if action == "clean_descriptions":
         from .normalize import norm_description
         from .parsers.base import strip_type

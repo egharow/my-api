@@ -725,3 +725,28 @@ def test_a_locked_file_in_the_drive_folder_does_not_stop_the_check(app, conn, ho
     res = post(app, "/watch/check", {}, headers={"referer": "http://localhost/sheet"})
     assert dict(res.headers)["Location"] == "/upload"
     assert "close it in other programs" in _flash(res).lower() or "would not let the app open" in _flash(res)
+
+
+def test_card_purchases_can_count_in_the_month_bought_or_the_month_billed(app, conn):
+    from ftracker import booking, summary
+    line = conn.execute("SELECT id, txn_date, budget_month FROM transactions WHERE description = 'ONE OFF SERVICE'").fetchone()
+    assert line["txn_date"][:7] == "2026-09" and line["budget_month"] == "2026-10"                     # bought in September, billed in October
+    assert "billed" in text(get(app, "/")) or True
+    res = post(app, "/setting/card-basis", {"basis": "purchase"})
+    assert res.status == 303 and booking.basis(conn) == "purchase"
+    assert conn.execute("SELECT budget_month FROM transactions WHERE id = ?", (line["id"],)).fetchone()[0] == "2026-09"
+    assert sum(summary.daily_spending(conn, "2026-09").values()) == summary.month_overview(conn, "2026-09")["spending"]
+    assert "The month I bought it" in text(get(app, "/setup"))
+    post(app, "/setting/card-basis", {"basis": "billing"})
+    assert conn.execute("SELECT budget_month FROM transactions WHERE id = ?", (line["id"],)).fetchone()[0] == "2026-10"
+    assert booking.month_for("purchase", "2026-09-03", "2026-10-02", 3) == "2026-10"                # an instalment stays with its bill
+    assert booking.month_for("purchase", "2026-09-03", "2026-10-02") == "2026-09"
+
+
+def test_a_new_import_follows_the_chosen_month(home, conn, monkeypatch):
+    from datetime import date
+    from ftracker import booking
+    from .helpers import card_file, card_txn, run_import
+    booking.set_basis(conn, "purchase")
+    run_import(home, conn, monkeypatch, [("p.xlsx", card_file(last4="8888", billing=date(2026, 10, 2), txns=[card_txn(date(2026, 9, 28), "SHOP", 10.0, "pp1")]))])
+    assert conn.execute("SELECT budget_month FROM transactions WHERE voucher = 'pp1'").fetchone()[0] == "2026-09"

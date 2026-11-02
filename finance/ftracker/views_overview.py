@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date
 from html import escape as esc
 
-from . import balances, budgets, charts, closing, expected, insights, summary
+from . import balances, booking, budgets, charts, closing, expected, insights, summary
 from .charts import money
 from .views_budget import budget_card
 from .views_recurring import alerts_card
@@ -305,8 +305,9 @@ def _pace(conn, ctx, d, m, owner) -> str:
     verdict = (f"Expenses so far are {money(abs(ahead))} {'above' if ahead > 0 else 'below'} what you usually have spent by this day of the month"
                if abs(ahead) >= 1 else "Expenses so far are right on what you usually have spent by this day")
     return ('<div class="card" style="margin-top:14px"><h4 style="margin:0 0 4px">Expenses, day by day</h4>'
-            f'<p class="cap" style="margin:0 0 8px">{verdict}. This is only expenses, not income. Each step up is money leaving your accounts: '
-            'card spending counts on the day the card is billed, everything else on the day it was paid. '
+            f'<p class="cap" style="margin:0 0 8px">{verdict}. This is only expenses, not income. Each step up is a payment: '
+            + ('every payment counts on the day you made it, card purchases on the day you bought them. ' if booking.basis(conn) == "purchase"
+               else 'card spending counts on the day the card is billed, everything else on the day it was paid. ') +
             f'The line ends at the Expenses total above. The dashed line is your usual month and the grey band is the range of your last {len(earlier)} months.</p>'
             + charts.pace_chart(this, usual, low, high, "ILS", "Expenses added up through the month", m) + "</div>")
 
@@ -329,6 +330,8 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
     if not spend and not inc:
         return _tiles(0, 0, 0) + '<div class="card" style="margin-top:14px"><p>Nothing recorded for this month yet.</p></div>'
     note = ""
+    note += ('<p class="cap">Card purchases count in the month you bought them.</p>' if booking.basis(conn) == "purchase"
+             else '<p class="cap">Card purchases count in the month the card is billed.</p>')
     if m in ctx.closed:
         note = ('<p class="cap"><span class="chip good"><b>✔</b> Closed</span> You closed this month. '
                 'Changing a payment still works, but the numbers move.' + ("" if ctx.readonly else f' <a href="/close?m={m}">Reopen</a>') + '</p>')
