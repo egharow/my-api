@@ -674,3 +674,32 @@ def test_a_screenshot_dropped_on_the_upload_page_joins_the_to_do_list(app, home)
     body = (b"--B\r\nContent-Disposition: form-data; name=\"file\"; filename=\"s.png\"\r\nContent-Type: image/png\r\n\r\nPNGDATA\r\n--B--\r\n")
     res = app.handle("POST", "/upload", {**H, "content-type": "multipart/form-data; boundary=B", "x-csrf": app.csrf}, body)
     assert res.status == 200 and screens.waiting_names(home) == ["s.png"]
+
+
+PENSION = _words([
+    (10, [("קרן", 400), ("השתלמות", 340), ("₪94,263.25", 40)]),
+    (40, [("2", 400), ("מוצרים", 360), ("מהיתרה", 300), ("37.4%", 250)]),                    # the count shares its row with a percentage
+    (90, [("מורים", 400), ("תיכוניים", 340), ("₪49,968.14", 40)]),
+    (120, [("סכום", 400), ("הפקדה", 340), ("אחרון:", 300), ("₪1,233.27", 40)]),
+    (200, [("מחר", 400), ("השתלמות", 340), ("₪44,295.11", 40)]),
+    (300, [("קרן", 400), ("פנסיה", 340), ("₪91,686.05", 40)]),
+    (330, [("1", 400), ("מוצר", 360)]),
+    (380, [("כלל", 400), ("פנסיה", 340), ("₪91,686.05", 40)]),
+])
+
+
+def test_a_new_screen_is_matched_by_section_owner_and_balance(app, conn):
+    from ftracker import screens
+    found = screens.extract(PENSION)
+    sections = {r["label"]: r["section"] for r in found}
+    assert sections["מורים תיכוניים"] == "קרן השתלמות"                                       # the count row is found although a percentage is on it
+    assert any(r["total"] and r["amount"] == 94263.25 for r in found) and not any(r["amount"] == 1233.27 and not r["total"] for r in found)
+    savings = conn.execute("SELECT id, owner_id FROM accounts WHERE kind = 'savings' AND active = 1 AND issuer != 'sheet' ORDER BY id").fetchall()
+    # an account whose last balance is close to the amount on the screen is suggested, and only one of the right kind
+    target = savings[0]["id"]
+    conn.execute("INSERT OR REPLACE INTO balances (account_id, as_of, amount, currency, created_at) VALUES (?, '2026-10-01', 50000, 'ILS', 'x')", (target,))
+    conn.commit()
+    picks = screens.suggest_all(conn, found, "2026-11-02")
+    chosen = {r["label"]: p for r, p in zip(found, picks)}
+    assert chosen["מורים תיכוניים"] == (target, "balance")
+    assert chosen["מחר"][0] != target                                                          # not given twice

@@ -14,7 +14,9 @@ IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 MAX_BYTES = 15 * 1024 * 1024
 DONE_KEY = "screens_done"
 _MONEY = re.compile(r"^(?P<a>[₪$€])?(?P<neg>-)?(?P<num>\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|\d+\.\d{1,2}|\d+)(?P<b>[₪$€])?$")
-_COUNT = re.compile(r"^\d+\s*(חשבונות|חשבון|תיקים|תיק|מוצרים|מוצר|כרטיסים|כרטיס|קופות|קופה)$")
+_COUNT = re.compile(r"(?:^|\s)(?:\d+\s*(?:חשבונות|חשבון|תיקים|תיק|מוצרים|מוצר|כרטיסים|כרטיס|קופות|קופה)|(?:חשבונות|תיקים|מוצרים|כרטיסים)\s*\d+)(?:\s|$)")
+SECTION_KINDS = (("פנסיה", ("pension",)), ("השתלמות", ("savings", "pension")), ("גמל", ("savings", "pension")), ("ניירות ערך", ("investment",)),
+                 ('עו"ש', ("bank",)), ('עוש', ("bank",)), ('מט"ח', ("bank",)), ("פיקדון", ("savings", "bank")), ("חיסכון", ("savings",)))
 _SKIP = ("שער", "שינוי", "מועד", "תאריך", "דמי", "הפקדה", "נזילות", "פוליסה", "צפוי", "יתרה משוערת", "שווי נכסים", "חיובים קרובים", "יתרה כוללת", "%")
 _SYMBOL = {"₪": "ILS", "$": "USD", "€": "EUR"}
 
@@ -132,7 +134,7 @@ def extract(words: list[dict]) -> list[dict]:
         rows.append({"money": money, "label": re.sub(r"\s+", " ", " ".join(label)).strip(), "y": min(w["y"] for w in r)})
     out, section = [], ""
     for i, r in enumerate(rows):
-        if _COUNT.match(r["label"]) and i > 0:
+        if _COUNT.search(r["label"]) and i > 0:
             head = out[-1] if out and out[-1]["y"] == rows[i - 1]["y"] else None
             section = rows[i - 1]["label"]
             if head:
@@ -202,3 +204,48 @@ def approve(conn: sqlite3.Connection, rows: list[dict], as_of: str) -> int:
         saved += 1
     conn.commit()
     return saved
+
+
+def _kinds(section: str) -> tuple:
+    for key, kinds in SECTION_KINDS:
+        if key in section:
+            return kinds
+    return ()
+
+
+def suggest_all(conn: sqlite3.Connection, found: list[dict], today: str) -> list[tuple[int | None, str]]:
+    """For each line: (account id or None, how it was matched). Names and earlier matches first, then the balance itself:
+    among accounts of the right kind and of the person this screenshot belongs to, the one whose last balance is closest."""
+    picks: list[tuple[int | None, str]] = [(None, "")] * len(found)
+    for i, r in enumerate(found):
+        if not r["total"]:
+            a = suggest(conn, r["section"], r["label"])
+            if a:
+                picks[i] = (a, "name")
+    taken = {a for a, _ in picks if a}
+    owners: dict = {}
+    for a in taken:
+        o = conn.execute("SELECT owner_id FROM accounts WHERE id = ?", (a,)).fetchone()
+        if o and o[0]:
+            owners[o[0]] = owners.get(o[0], 0) + 1
+    owner = max(owners, key=owners.get) if owners and max(owners.values()) / sum(owners.values()) >= 0.7 else None
+    accts = conn.execute(
+        """SELECT a.id, a.kind, a.currency, a.owner_id,
+                  (SELECT b.amount FROM balances b WHERE b.account_id = a.id ORDER BY b.as_of DESC LIMIT 1) AS last
+           FROM accounts a WHERE a.active = 1 AND a.kind != 'card' AND a.issuer NOT IN ('sheet', 'cash') AND (a.closed_on IS NULL OR a.closed_on > ?)""", (today,)).fetchall()
+    for i, r in enumerate(found):
+        if r["total"] or picks[i][0]:
+            continue
+        kinds = _kinds(r["section"])
+        scored = []
+        for a in accts:
+            if a["id"] in taken or a["last"] in (None, 0) or (kinds and a["kind"] not in kinds) or (owner and a["owner_id"] != owner):
+                continue
+            amount = to_account_currency(conn, r["amount"], r["currency"], a["currency"], today)
+            scored.append((abs(abs(a["last"]) - abs(amount)) / max(abs(amount), 1.0), a["id"]))
+        scored.sort()
+        limit = 0.15 if kinds else 0.05
+        if scored and scored[0][0] <= limit and (len(scored) == 1 or scored[1][0] >= scored[0][0] * 2):
+            picks[i] = (scored[0][1], "balance")
+            taken.add(scored[0][1])
+    return picks

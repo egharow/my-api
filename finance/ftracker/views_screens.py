@@ -43,11 +43,14 @@ def review_page(conn: sqlite3.Connection, ctx: Ctx, home: Home, name: str) -> st
     accts = _accounts(conn, ctx.today)
     opts = "".join(f'<option value="{a["id"]}">{esc(a["label"])}{" · " + esc(a["owner"]) if a["owner"] else ""} ({esc(a["currency"])})</option>' for a in accts)
 
+    picks = screens.suggest_all(conn, found, ctx.today)
+
     def row(i, r):
-        pick = None if r["total"] else screens.suggest(conn, r["section"], r["label"])
+        pick, how = picks[i]
         sel = opts.replace(f'value="{pick}"', f'value="{pick}" selected') if pick else opts
         shown = f'{r["amount"]:,.2f}'
         chips = ' <span class="chip">total</span>' if r["total"] else (' <span class="chip">dollars</span>' if r["currency"] == "USD" else "")
+        chips += ' <span class="chip" title="Matched because the balance is close to the one you have. Check it.">guess</span>' if how == "balance" else ""
         return (f'<tr><td><input type="checkbox" name="r{i}_on" value="1"{" checked" if pick else ""} aria-label="Save"></td>'
                 f'<td dir="auto"><b>{esc(r["label"] or "(no name)")}</b>{chips}<div class="cap" dir="auto">{esc(r["section"])}</div>'
                 f'<input type="hidden" name="r{i}_label" value="{esc(r["label"])}"><input type="hidden" name="r{i}_section" value="{esc(r["section"])}"><input type="hidden" name="r{i}_cur" value="{r["currency"]}"></td>'
