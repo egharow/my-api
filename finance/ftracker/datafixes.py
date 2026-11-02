@@ -1,7 +1,7 @@
 """One-time corrections to your own data, listed in a data_fixes.json file next to the program.
 
 Each entry has an id and is applied once (the id is remembered), after a backup of your database is made.
-Actions: move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
+Actions: add_account, set_owner, activate_account, set_balance, move_merchant, propose_rule, resuggest, rename_account, close_account, delete_account, merge_accounts, set_balances, rename_category, add_category, add_rule, delete_rule, recategorize_line.
 """
 import json
 import sqlite3
@@ -9,7 +9,7 @@ import traceback
 from datetime import date
 from pathlib import Path
 
-from . import accounts, categorize
+from . import accounts, balances, categorize
 from .backup import make_backup
 from .config import Home
 from .db import audit
@@ -67,6 +67,31 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
             return f"skipped: payment {e['description']} on {e['date']} not found"
         categorize.approve(conn, ids, e["category"], learn=False)
         return f"{e['description']} ({e['date']}) moved to {e['category']}"
+    if action == "add_account":
+        if _account(conn, e["label"]):
+            return f"account {e['label']} already exists"
+        accounts.add_account(conn, e["kind"], "manual", e["label"], e.get("owner"), e.get("currency", "ILS"))
+        return f"account {e['label']} added"
+    if action == "set_owner":
+        acct = _account(conn, e["label"])
+        if not acct:
+            return f"skipped: no account called {e['label']}"
+        conn.execute("UPDATE accounts SET owner_id = ? WHERE id = ?", (accounts.owner_id(conn, e["owner"]), acct[0]))
+        conn.commit()
+        return f"{e['label']} now belongs to {e['owner']}"
+    if action == "activate_account":
+        acct = _account(conn, e["label"])
+        if not acct:
+            return f"skipped: no account called {e['label']}"
+        conn.execute("UPDATE accounts SET active = 1, closed_on = NULL WHERE id = ?", (acct[0],))
+        conn.commit()
+        return f"{e['label']} is in use again"
+    if action == "set_balance":
+        acct = _account(conn, e["label"])
+        if not acct:
+            return f"skipped: no account called {e['label']}"
+        balances.set_balance_for(conn, acct[0], float(e["amount"]), e["as_of"], e.get("currency"))
+        return f"{e['label']}: {float(e['amount']):,.2f} on {e['as_of']}"
     if action == "move_merchant":
         from .normalize import norm_description
         pat = f"%{norm_description(e['pattern'])}%"

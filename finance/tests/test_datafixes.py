@@ -182,3 +182,22 @@ def test_a_merchant_can_be_moved_to_a_new_category_everywhere_it_is_still_open(c
     lines = datafixes.apply(conn, home, app, date(2026, 10, 18))
     assert "2 payment(s)" in lines[1]
     assert {r[0] for r in conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.voucher IN ('r1','r2')")} == {"Public transportation"}
+
+
+def test_accounts_can_be_added_reowned_reopened_and_given_a_balance(conn, home, tmp_path):
+    from ftracker import accounts, balances
+    accounts.add_owner(conn, "Ely"); accounts.add_owner(conn, "Shir")
+    old = accounts.add_account(conn, "bank", "manual", "לאומי", "Ely")
+    conn.execute("UPDATE accounts SET active = 0 WHERE id = ?", (old,)); conn.commit()
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([
+        {"id": "a", "action": "set_owner", "label": "לאומי", "owner": "Shir"},
+        {"id": "b", "action": "activate_account", "label": "לאומי"},
+        {"id": "c", "action": "add_account", "label": "Fund", "kind": "savings", "owner": "Shir", "currency": "ILS"},
+        {"id": "d", "action": "set_balance", "label": "Fund", "amount": 1234.5, "currency": "ILS", "as_of": "2026-11-02"},
+        {"id": "e", "action": "set_balance", "label": "nothing", "amount": 1, "as_of": "2026-11-02"}]), encoding="utf-8")
+    lines = datafixes.apply(conn, home, app, date(2026, 11, 2))
+    assert lines[4].startswith("skipped")
+    row = conn.execute("SELECT a.active, o.name FROM accounts a JOIN owners o ON o.id = a.owner_id WHERE a.label = 'לאומי'").fetchone()
+    assert tuple(row) == (1, "Shir")
+    assert conn.execute("SELECT amount FROM balances b JOIN accounts a ON a.id = b.account_id WHERE a.label = 'Fund'").fetchone()[0] == 1234.5
