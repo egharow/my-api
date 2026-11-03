@@ -270,12 +270,13 @@ a{color:var(--accent)}
 .side a{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 12px;color:var(--ink2);text-decoration:none;font-weight:500}
 .side a:hover{background:color-mix(in srgb,var(--ink) 5%,transparent);color:var(--ink)}
 .side a.on{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:600}
-.side a .lbl{flex:1 1 auto;min-width:0}.side .badge{white-space:nowrap;flex:0 0 auto}
+.side a .lbl{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.side .badge{white-space:nowrap;flex:0 0 auto}
 .side .badge{font-family:var(--num);font-size:12px;padding:1px 6px;background:var(--ink);color:var(--surface);border-radius:2px}
 .side .badge.soft{background:transparent;color:#8a5a00;padding:0;font-size:11px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .side .badge.soft{color:#e0b060}}
 :root[data-theme="dark"] .side .badge.soft{color:#e0b060}
-.side .sep{border-top:1px solid var(--grid);margin:10px 12px}
+.side .sg{display:flex;flex-direction:column;gap:1px;margin-bottom:10px}.side .gt{padding:6px 12px 4px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.side a{min-height:40px!important;font-size:14px}
 .sidefoot{margin-top:auto;padding:16px 12px 0;border-top:1px solid var(--grid);display:flex;flex-direction:column;gap:10px}
 .theme{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--border)}
 .theme button{height:32px;border:0;border-left:1px solid var(--border);border-radius:0;padding:0;font-size:13px;font-weight:400;background:var(--surface);color:var(--ink2)}
@@ -330,7 +331,26 @@ a{color:var(--accent)}
 .nwcard:hover{border-color:var(--ink)}
 .band{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;padding:12px 18px;background:var(--surface);border:1px solid var(--border);border-top:0;font-size:13px;color:var(--ink2)}
 .band .bar{flex:1 1 240px;height:6px;background:var(--grid)}.band .bar span{display:block;height:6px;background:var(--ink)}
+/* transactions */
+.tfilter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}.tfilter input[type=search]{flex:1 1 260px;min-width:0;height:40px}.tfilter select,.tfilter button{height:40px}
+.tsum{display:flex;flex-wrap:wrap;gap:8px 32px;padding:12px 20px;background:var(--surface);border-top:2px solid var(--rule);font-size:14px;color:var(--ink2)}
+.tsum .good,.tbl .good{color:var(--goodtext)}.tkey{display:flex;gap:16px;margin-left:auto;font-size:13px}.tkey span{display:flex;align-items:center;gap:6px}
+.mk{display:inline-block;width:8px;height:8px;box-sizing:border-box}.mk.ok{background:var(--ink)}.mk.guess{border:1px dashed var(--muted)}
+.tbl{background:var(--surface);margin-top:12px;overflow-x:auto}
+.thead,.trow>summary{display:grid;grid-template-columns:16px minmax(0,1.6fr) minmax(0,1fr) 150px 130px;gap:16px;align-items:center;padding:0 20px;min-width:760px}
+.thead{padding:10px 20px;border-bottom:1px solid var(--rule);font-size:12px;color:var(--muted);letter-spacing:.04em;text-transform:uppercase}
+.tday{display:flex;justify-content:space-between;padding:14px 20px 6px;font-size:13px;font-weight:600;color:var(--ink2);border-bottom:1px solid var(--grid);min-width:760px;box-sizing:border-box}
+.trow>summary{min-height:48px;border-bottom:1px solid var(--grid);cursor:pointer;list-style:none}.trow>summary::-webkit-details-marker{display:none}
+.trow>summary:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.trow .mer{min-width:0}.trow .mer .cap{display:block}.trow .acc{font-size:14px;color:var(--ink2)}.trow .r,.thead .r{text-align:right}
+.trow .gchip{border:1px dashed var(--muted);padding:1px 8px;justify-self:start}.trow .nocat{color:#8a5a00}.trow.lo .mer,.trow.lo .mono{opacity:.55}
+.tchg{padding:10px 20px 14px 52px;background:color-mix(in srgb,var(--ink) 3%,transparent);border-bottom:1px solid var(--grid)}
+.tmore{padding:14px 20px}
 @media (max-width:820px){
+ .thead{display:none}.tday{min-width:0}.trow>summary{grid-template-columns:12px minmax(0,1fr) auto;min-width:0;padding:8px 16px;gap:2px 12px}
+ .trow>summary .mk{grid-row:1/3;align-self:start;margin-top:8px}.trow>summary .mer{grid-column:2}.trow>summary .r{grid-column:3;grid-row:1}
+ .trow>summary .gchip,.trow>summary .nocat,.trow>summary>span:nth-of-type(2){grid-column:2;grid-row:2;font-size:13px}.trow .acc{display:none}.tchg{padding-left:16px}
+ .tfilter select{flex:1 1 40%}.tbl{overflow-x:visible}
  .side{display:none}
  .tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--border);padding:6px 4px calc(10px + env(safe-area-inset-bottom))}
  .tabs a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;font-size:11px;color:var(--ink2);text-decoration:none}
@@ -365,19 +385,32 @@ NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/recur
 ICONS = {
     "/": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
     "/review": "M4 12l5 5L20 6",
+    "/transactions": "M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1",
+    "/alerts": "M6 17v-6a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
+    "/upload": "M12 15V4M7 9l5-5 5 5M5 20h14",
     "/files": "M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7",
+    "/balances": "M4 20h16M6 16V9M10 16V5M14 16v-6M18 16V8",
+    "/cash": "M3 7h18v10H3zM12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z",
+    "/close": "M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3",
+    "/budgets": "M12 3v9h9M12 3a9 9 0 1 0 9 9",
+    "/recurring": "M4 12a8 8 0 0 1 14-5.3M20 12a8 8 0 0 1-14 5.3M18 3v4h-4M6 21v-4h4",
+    "/goals": "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z",
+    "/trips": "M4 8h16v12H4zM9 8V5h6v3M4 13h16",
+    "/simulator": "M4 20l6-7 4 3 6-9M15 7h5v5",
     "/wealth": "M4 19h16M5 15l4-4 4 3 6-7",
-    "/upload": "M12 4v11M7 10l5 5 5-5M5 20h14",
-    "/recurring": "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2M20 4v5h-5M4 20v-5h5",
-    "/trips": "M3 17l18-6-6 9-3-4-4-1zM12 16V9",
-    "/budgets": "M4 20V10M10 20V4M16 20v-7M22 20H2",
-    "/alerts": "M12 4l9 16H3zM12 10v4M12 17h.01",
     "/setup": "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
     "/more": "M5 12h1M12 12h1M19 12h1",
 }
-SIDE_MAIN = [("/", "Overview"), ("/review", "Review"), ("/files", "Statements"), ("/wealth", "Wealth")]
-SIDE_MORE = [("/upload", "Upload"), ("/recurring", "Recurring"), ("/trips", "Trips"), ("/budgets", "Budgets"), ("/alerts", "Alerts"), ("/setup", "Settings")]
-PHONE_TABS = [("/", "Overview"), ("/review", "Review"), ("/files", "Statements"), ("/wealth", "Wealth"), ("/more", "More")]
+# the sidebar, in groups (a title of None is a group without a heading)
+SIDE_GROUPS = [
+    (None, [("/", "Overview"), ("/review", "Review"), ("/transactions", "Transactions"), ("/alerts", "Alerts")]),
+    ("Bring in", [("/upload", "Add statements"), ("/files", "Statements"), ("/balances", "Balances"), ("/cash", "Cash payments"), ("/close", "Close the month")]),
+    ("Plan", [("/budgets", "Budgets"), ("/recurring", "Recurring"), ("/goals", "Goals"), ("/trips", "Trips"), ("/simulator", "Simulator"), ("/wealth", "Wealth")]),
+    (None, [("/setup", "Settings")]),
+]
+SIDE_MAIN = SIDE_GROUPS[0][1]
+SIDE_MORE = [n for _, items in SIDE_GROUPS[1:] for n in items]
+PHONE_TABS = [("/", "Overview"), ("/review", "Review"), ("/transactions", "Activity"), ("/wealth", "Wealth"), ("/more", "More")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:
@@ -406,24 +439,47 @@ def _missing_statements(conn, ctx: Ctx) -> int:
     return sum(1 for g in cl["groups"] for i in g["items"] if i["status"] == "todo" and not i.get("children"))
 
 
+def _badges(conn, ctx: Ctx, c: dict) -> dict:
+    out = {"/review": (str(c["review"]) if c["review"] else "")}
+    if ctx.readonly:
+        return out
+    miss = _missing_statements(conn, ctx)
+    out["/files"] = f"{miss} missing" if miss else ""
+    try:
+        from . import alerts, closing
+        n = len(alerts.build(conn, ctx.today))
+        out["/alerts"] = str(n) if n else ""
+        nxt = closing.to_close(conn, ctx.today)
+        if nxt:
+            out["/close"] = f"{MONTH_ABBR[int(nxt[5:7]) - 1]} open"
+    except Exception:
+        pass
+    return out
+
+
+MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+PHONE_ALLOWED = {"/", "/wealth"}
+
+
 def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     c = counts(conn)
-    allowed = {"/", "/wealth"}
-    badges = {"/review": (str(c["review"]) if c["review"] else ""), "/items": (str(c["items"]) if c["items"] else "")}
-    if not ctx.readonly:
-        miss = _missing_statements(conn, ctx)
-        badges["/files"] = f"{miss} missing" if miss else ""
+    badges = _badges(conn, ctx, c)
     here = "/" if path in ("/", "/spending", "/trends", "/dashboard") else path
+    if path in ("/imports", "/history"):
+        here = "/files"
 
     def side_link(href: str, name: str) -> str:
         b = badges.get(href, "")
-        cls = "on" if here == href or (href == "/files" and path in ("/files", "/imports", "/history")) else ""
+        on = here == href
         bcls = "badge" if b.isdigit() else "badge soft"
-        return (f'<a href="{href}" class="{cls}"{" aria-current=page" if cls else ""}>{_icon(href)}<span class="lbl">{name}</span>'
+        return (f'<a href="{href}" class="{"on" if on else ""}"{" aria-current=page" if on else ""}>{_icon(href)}<span class="lbl">{name}</span>'
                 + (f'<span class="{bcls}">{b}</span>' if b else "") + "</a>")
 
-    main_links = [n for n in SIDE_MAIN if not ctx.readonly or n[0] in allowed]
-    more_links = [] if ctx.readonly else SIDE_MORE
+    groups = []
+    for title_, items in SIDE_GROUPS:
+        links = [n for n in items if not ctx.readonly or n[0] in PHONE_ALLOWED]
+        if links:
+            groups.append(f'<div class="sg">{"<div class=gt>" + title_ + "</div>" if title_ else ""}{"".join(side_link(*n) for n in links)}</div>')
     flash = f'<div class="flash {"err" if ctx.flash_kind == "err" else ""}" role="status">{esc(ctx.flash)}</div>' if ctx.flash else ""
     quit_form = "" if ctx.readonly else _form(ctx, "/quit", "<button class='quiet quit' title='Close the app'>Quit</button>", "inline")
     theme = ('<div class="theme" role="group" aria-label="Theme">'
@@ -440,10 +496,8 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
         if last:
             backup = f'<div class="bk">{esc(last)}</div>'
     side = ('<aside class="side" aria-label="Main"><div class="brand"><span class="mark" aria-hidden="true">₪</span><b>Household ledger</b></div>'
-            + "".join(side_link(*n) for n in main_links)
-            + ('<div class="sep"></div>' + "".join(side_link(*n) for n in more_links) if more_links else "")
-            + f'<div class="sidefoot">{theme}{backup}{quit_form}</div></aside>')
-    tabs_src = [t for t in PHONE_TABS if not ctx.readonly or t[0] in allowed]
+            + "".join(groups) + f'<div class="sidefoot">{theme}{backup}{quit_form}</div></aside>')
+    tabs_src = [t for t in PHONE_TABS if not ctx.readonly or t[0] in PHONE_ALLOWED]
     tabs = "".join(
         f'<a href="{h}" class="{"on" if (here == h or (h == "/more" and here in dict(SIDE_MORE))) else ""}">'
         f'<span class="ti">{_icon(h, 24)}' + (f'<span class="tb">{badges[h]}</span>' if badges.get(h) and badges[h].isdigit() else "")

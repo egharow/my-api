@@ -811,3 +811,20 @@ def test_the_files_page_shows_each_statement_with_its_account_dates_and_months(a
     page = text(get(app, "/files"))
     assert "Where every file went" in page and "adds up" in page and "Counted in" in page
     assert "/files" in text(get(app, "/upload"))
+
+
+def test_transactions_page_lists_lines_and_filters(app):
+    t = text(get(app, "/transactions?m=all"))
+    assert "ONE OFF SERVICE" in t and "−3,500.00" in t and "guessed" in t
+    assert "ONE OFF SERVICE" not in text(get(app, "/transactions?m=all&q=nothing-like-this"))
+    assert "ONE OFF SERVICE" in text(get(app, "/transactions?m=all&q=3500"))          # a number searches amounts
+    assert "ONE OFF SERVICE" not in text(get(app, "/transactions?m=all&st=confirmed"))
+    assert "ONE OFF SERVICE" in text(get(app, "/transactions?m=all&st=guessed"))
+
+
+def test_sidebar_has_the_grouped_screens_and_phone_tabs(app):
+    t = text(get(app, "/"))
+    for label in ("Transactions", "Alerts", "Bring in", "Add statements", "Cash payments", "Close the month", "Plan", "Budgets", "Goals", "Simulator"):
+        assert label in t
+    more = text(get(app, "/more"))
+    assert "Budgets" in more and "Settings" in more

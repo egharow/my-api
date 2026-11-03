@@ -165,6 +165,11 @@ def wealth_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
 
 def more_page(conn, ctx) -> str:
     """The phone's 'More' tab: everything that is not one of the four main tabs."""
-    from .views import SIDE_MORE, _icon, layout
-    links = "".join(f'<a href="{h}">{_icon(h, 22)}<span>{n}</span></a>' for h, n in SIDE_MORE)
-    return layout(conn, ctx, "/more", "More", f'<h1>More</h1><div class="moregrid">{links}</div>')
+    from .views import SIDE_GROUPS, _icon, layout
+    skip = {"/", "/review", "/transactions", "/wealth"}
+    parts = []
+    for title, items in SIDE_GROUPS:
+        links = "".join(f'<a href="{h}">{_icon(h, 22)}<span>{n}</span></a>' for h, n in items if h not in skip)
+        if links:
+            parts.append((f'<h3>{title}</h3>' if title else "") + f'<div class="moregrid">{links}</div>')
+    return layout(conn, ctx, "/more", "More", '<h1>More</h1>' + "".join(parts))
