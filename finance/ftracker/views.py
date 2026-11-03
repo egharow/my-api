@@ -257,7 +257,42 @@ th{font-size:11.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--mu
 a{color:var(--accent)}
 .up{color:var(--critical)}.down{color:var(--goodtext)}
 .foot{letter-spacing:.06em;text-transform:uppercase;font-size:11px}
-@media print{header,.todo,button,.modes,#tip{display:none}body{background:#fff}}
+@media print{.side,.tabs,.todo,button,.modes,#tip{display:none}body{background:#fff}}
+
+/* shell (design A): a sidebar on a computer, a tab bar on a phone */
+.shell{display:flex;min-height:100vh;align-items:stretch}
+.content{flex:1 1 0;min-width:0}
+.side{flex:0 0 232px;width:232px;box-sizing:border-box;background:var(--surface);border-right:1px solid var(--border);padding:20px 12px;display:flex;flex-direction:column;gap:2px;position:sticky;top:0;height:100vh;overflow:auto}
+.side .brand{display:flex;align-items:center;gap:10px;padding:4px 12px 18px}
+.side .brand b{font-weight:600;font-size:15px}
+.side .mark{width:28px;height:28px;background:var(--ink);color:var(--surface);display:flex;align-items:center;justify-content:center;font-family:var(--num);font-size:13px;font-weight:600}
+.side a{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 12px;color:var(--ink2);text-decoration:none;font-weight:500}
+.side a:hover{background:color-mix(in srgb,var(--ink) 5%,transparent);color:var(--ink)}
+.side a.on{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:600}
+.side a .lbl{flex:1 1 auto;min-width:0}.side .badge{white-space:nowrap;flex:0 0 auto}
+.side .badge{font-family:var(--num);font-size:12px;padding:1px 6px;background:var(--ink);color:var(--surface);border-radius:2px}
+.side .badge.soft{background:transparent;color:#8a5a00;padding:0;font-size:11px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .side .badge.soft{color:#e0b060}}
+:root[data-theme="dark"] .side .badge.soft{color:#e0b060}
+.side .sep{border-top:1px solid var(--grid);margin:10px 12px}
+.sidefoot{margin-top:auto;padding:16px 12px 0;border-top:1px solid var(--grid);display:flex;flex-direction:column;gap:10px}
+.theme{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--border)}
+.theme button{height:32px;border:0;border-left:1px solid var(--border);border-radius:0;padding:0;font-size:13px;font-weight:400;background:var(--surface);color:var(--ink2)}
+.theme button:first-child{border-left:0}
+.theme button[aria-pressed=true]{background:var(--ink);color:var(--surface)}
+.sidefoot .bk{font-size:12px;color:var(--muted);line-height:1.35}
+.tabs{display:none}
+.moregrid{display:grid;gap:0;background:var(--surface);border-top:2px solid var(--rule)}
+.moregrid a{display:flex;align-items:center;gap:14px;min-height:56px;padding:0 16px;border-bottom:1px solid var(--grid);color:var(--ink);text-decoration:none}
+@media (max-width:820px){
+ .side{display:none}
+ .tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--border);padding:6px 4px calc(10px + env(safe-area-inset-bottom))}
+ .tabs a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-height:52px;font-size:11px;color:var(--ink2);text-decoration:none}
+ .tabs a.on{color:var(--accent);font-weight:600}
+ .tabs .ti{position:relative;display:inline-flex}
+ .tabs .tb{position:absolute;top:-4px;left:16px;min-width:18px;height:18px;padding:0 4px;box-sizing:border-box;background:var(--ink);color:var(--surface);font-family:var(--num);font-size:11px;line-height:18px;text-align:center}
+ .content{padding-bottom:84px}
+}
 """
 
 HEARTBEAT = """
@@ -272,7 +307,31 @@ document.addEventListener('mousemove',function(e){t.style.left=Math.min(e.client
 document.addEventListener('mouseout',function(e){if(!e.relatedTarget||!e.relatedTarget.closest||!e.relatedTarget.closest('[data-tip]'))t.style.display='none'});})();
 """
 
+THEME_JS = """(function(){try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}
+document.addEventListener('DOMContentLoaded',function(){var cur='auto';try{cur=localStorage.getItem('theme')||'auto'}catch(e){}
+var bs=document.querySelectorAll('[data-theme-set]');bs.forEach(function(b){b.setAttribute('aria-pressed',b.getAttribute('data-theme-set')===cur?'true':'false');
+b.addEventListener('click',function(){var v=b.getAttribute('data-theme-set');try{if(v==='auto')localStorage.removeItem('theme');else localStorage.setItem('theme',v)}catch(e){}
+if(v==='auto')document.documentElement.removeAttribute('data-theme');else document.documentElement.setAttribute('data-theme',v);
+bs.forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')})})})})})();"""
+
 NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/recurring", "Recurring"), ("/wealth", "Wealth"), ("/trips", "Trips"), ("/setup", "Settings")]
+# The sidebar: the screens you use most, then the rest. Each has a small stroke icon (24px grid).
+ICONS = {
+    "/": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
+    "/review": "M4 12l5 5L20 6",
+    "/files": "M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7",
+    "/wealth": "M4 19h16M5 15l4-4 4 3 6-7",
+    "/upload": "M12 4v11M7 10l5 5 5-5M5 20h14",
+    "/recurring": "M4 12a8 8 0 0 1 14-5l2 2M20 12a8 8 0 0 1-14 5l-2-2M20 4v5h-5M4 20v-5h5",
+    "/trips": "M3 17l18-6-6 9-3-4-4-1zM12 16V9",
+    "/budgets": "M4 20V10M10 20V4M16 20v-7M22 20H2",
+    "/alerts": "M12 4l9 16H3zM12 10v4M12 17h.01",
+    "/setup": "M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4",
+    "/more": "M5 12h1M12 12h1M19 12h1",
+}
+SIDE_MAIN = [("/", "Overview"), ("/review", "Review"), ("/files", "Statements"), ("/wealth", "Wealth")]
+SIDE_MORE = [("/upload", "Upload"), ("/recurring", "Recurring"), ("/trips", "Trips"), ("/budgets", "Budgets"), ("/alerts", "Alerts"), ("/setup", "Settings")]
+PHONE_TABS = [("/", "Overview"), ("/review", "Review"), ("/files", "Statements"), ("/wealth", "Wealth"), ("/more", "More")]
 
 
 def _form(ctx: Ctx, action: str, inner: str, cls: str = "") -> str:
@@ -288,25 +347,65 @@ def counts(conn: sqlite3.Connection) -> dict:
     }
 
 
+def _icon(path: str, size: int = 20) -> str:
+    return (f'<svg width="{size}" height="{size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" '
+            f'stroke-linecap="square" aria-hidden="true"><path d="{ICONS.get(path, ICONS["/more"])}"></path></svg>')
+
+
+def _missing_statements(conn, ctx: Ctx) -> int:
+    try:
+        cl = expected.checklist(conn, ctx.today)
+    except Exception:                      # a badge must never stop a page from opening
+        return 0
+    return sum(1 for g in cl["groups"] for i in g["items"] if i["status"] == "todo" and not i.get("children"))
+
+
 def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     c = counts(conn)
-    links = []
-    for href, name in ([n for n in NAV if n[0] in ("/", "/wealth")] if ctx.readonly else NAV):
-        badge = ""
-        if href == "/review" and c["review"]:
-            badge = f'<span class="badge">{c["review"]}</span>'
-        if href == "/items" and c["items"]:
-            badge = f'<span class="badge">{c["items"]}</span>'
-        links.append(f'<a href="{href}" class="{"on" if path == href else ""}">{name}{badge}</a>')
-    who = "".join(f'<option value="{esc(o)}"{" selected" if o == ctx.who else ""}>{esc(o)}</option>' for o in ctx.owners)
+    allowed = {"/", "/wealth"}
+    badges = {"/review": (str(c["review"]) if c["review"] else ""), "/items": (str(c["items"]) if c["items"] else "")}
+    if not ctx.readonly:
+        miss = _missing_statements(conn, ctx)
+        badges["/files"] = f"{miss} missing" if miss else ""
+    here = "/" if path in ("/", "/spending", "/trends", "/dashboard") else path
+
+    def side_link(href: str, name: str) -> str:
+        b = badges.get(href, "")
+        cls = "on" if here == href or (href == "/files" and path in ("/files", "/imports", "/history")) else ""
+        bcls = "badge" if b.isdigit() else "badge soft"
+        return (f'<a href="{href}" class="{cls}"{" aria-current=page" if cls else ""}>{_icon(href)}<span class="lbl">{name}</span>'
+                + (f'<span class="{bcls}">{b}</span>' if b else "") + "</a>")
+
+    main_links = [n for n in SIDE_MAIN if not ctx.readonly or n[0] in allowed]
+    more_links = [] if ctx.readonly else SIDE_MORE
     flash = f'<div class="flash {"err" if ctx.flash_kind == "err" else ""}" role="status">{esc(ctx.flash)}</div>' if ctx.flash else ""
-    who_form = (_form(ctx, "/who", "<label class=muted>You are <select name=who onchange=this.form.submit()>" + who + "</select></label>", "inline")
-                if ctx.owners else "")
-    quit_form = _form(ctx, "/quit", "<button class='quiet quit' title='Close the app'>Quit</button>", "inline")
+    quit_form = "" if ctx.readonly else _form(ctx, "/quit", "<button class='quiet quit' title='Close the app'>Quit</button>", "inline")
+    theme = ('<div class="theme" role="group" aria-label="Theme">'
+             '<button type="button" class="quiet" data-theme-set="light" aria-pressed="false">Light</button>'
+             '<button type="button" class="quiet" data-theme-set="dark" aria-pressed="false">Dark</button>'
+             '<button type="button" class="quiet" data-theme-set="auto" aria-pressed="true">Auto</button></div>')
+    backup = ""
+    if not ctx.readonly:
+        from . import cloudbackup
+        try:
+            last = cloudbackup.last_result(conn)
+        except Exception:
+            last = None
+        if last:
+            backup = f'<div class="bk">{esc(last)}</div>'
+    side = ('<aside class="side" aria-label="Main"><div class="brand"><span class="mark" aria-hidden="true">₪</span><b>Household ledger</b></div>'
+            + "".join(side_link(*n) for n in main_links)
+            + ('<div class="sep"></div>' + "".join(side_link(*n) for n in more_links) if more_links else "")
+            + f'<div class="sidefoot">{theme}{backup}{quit_form}</div></aside>')
+    tabs_src = [t for t in PHONE_TABS if not ctx.readonly or t[0] in allowed]
+    tabs = "".join(
+        f'<a href="{h}" class="{"on" if (here == h or (h == "/more" and here in dict(SIDE_MORE))) else ""}">'
+        f'<span class="ti">{_icon(h, 24)}' + (f'<span class="tb">{badges[h]}</span>' if badges.get(h) and badges[h].isdigit() else "")
+        + f'</span><span>{n}</span></a>' for h, n in tabs_src)
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-            f"<title>{esc(title)} · Finance</title><style>{CSS}</style></head><body><header><nav>" + "".join(links)
-            + "<span class=\"sp\"></span>" + ("" if ctx.readonly else quit_form)
-            + f"</nav></header><main>{flash}{body}</main><p class=\"foot\">Version {esc(BUILD)}</p><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
+            f"<title>{esc(title)} · Finance</title><style>{CSS}</style><script>{THEME_JS}</script></head><body>"
+            f"<div class=\"shell\">{side}<div class=\"content\"><main>{flash}{body}</main><p class=\"foot\">Version {esc(BUILD)}</p></div></div>"
+            f"<div class=\"tabs\" role=\"navigation\" aria-label=\"Main\">{tabs}</div><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
 
 
 def dmy(iso: str | None) -> str:

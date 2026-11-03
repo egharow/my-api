@@ -199,6 +199,8 @@ class App:
             return _html(200, views.dashboard(conn, ctx, q))
         if path == "/upload":
             return _html(200, views_home.upload_page(conn, ctx))
+        if path == "/more":
+            return _html(200, views_home.more_page(conn, ctx))
         if path in ("/spending", "/trends"):
             return _html(200, views_overview.overview_page(conn, ctx, q))
         if path in ("/wealth", "/networth"):
