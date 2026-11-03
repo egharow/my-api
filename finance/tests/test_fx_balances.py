@@ -119,3 +119,16 @@ def test_balances_due_monthly_and_stale_accounts(conn):
     assert balances.balances_due(conn, "2026-11-10")[0] is True
     assert [r["label"] for r in balances.stale(conn, "2026-11-10")] == ["Pension"]
     assert [p["current"] for p in balances.pending(conn, "2026-11-10")] == [False]
+
+
+def test_monthly_checklist_only_ticks_balances_updated_this_month(conn):
+    from ftracker import expected
+    accounts.add_account(conn, "pension", "x", "Pension")
+    balances.set_balance(conn, "Pension", 5, "2026-10-09")
+    p = balances.pending(conn, "2026-11-03")[0]
+    assert p["current"] is True and p["this_month"] is False      # recent, but not this month
+    item = [i for g in expected.checklist(conn, "2026-11-03")["groups"] for i in g["items"] if i["label"] == "Balances (monthly)"][0]
+    assert item["status"] == "todo" and item["children"][0]["status"] == "todo"
+    balances.set_balance(conn, "Pension", 6, "2026-11-02")
+    item = [i for g in expected.checklist(conn, "2026-11-03")["groups"] for i in g["items"] if i["label"] == "Balances (monthly)"][0]
+    assert item["status"] == "done" and item["children"][0]["status"] == "done"
