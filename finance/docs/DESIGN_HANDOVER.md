@@ -78,7 +78,7 @@ What we want designed:
 - Works as a **home-screen app** (icon, splash, standalone display), light and dark.
 - Right-to-left text inside left-to-right layout must not break rows.
 
-Decision for the designer to flag: which phone screens are read-only forever and which could allow changes later. Today the phone never changes anything.
+Update: the phone should be able to approve, change a category, add a cash payment and request a Drive check (see section 10). Today it changes nothing.
 
 ## 6. Key flows to design end to end
 
@@ -118,13 +118,21 @@ Decision for the designer to flag: which phone screens are read-only forever and
 5. The **key flows** in section 6 as short sequences.
 6. Handoff as **CSS variables and component notes** that can be pasted into the existing stylesheet, not a new framework.
 
-## 10. Open questions for Ely (answer before or during the work)
+## 10. Decisions from Ely
 
-- Keep the "printed ledger" direction, or open to a different one if it is better?
-- Should the phone ever be able to change data (confirm a category, add cash), or stay read-only?
-- Will other households use this? If yes, how much should onboarding carry?
-- Is Hebrew UI wanted, or only Hebrew data inside an English UI?
-- Which three screens matter most day to day?
+- **Direction:** open to a different one if it is better. Please propose 2-3 directions, one of which may keep Ledger.
+- **Phone can change things.** It can approve or change categories, add a cash payment, and trigger "check the Drive folder" after files are added to Drive. Design these as first-class phone actions, not an afterthought.
+- **Users:** only Ely's household for now (Ely and Shir). Keep onboarding simple but do not over-invest in it.
+- **Language:** English interface for now. Hebrew still appears inside data (merchants, categories), so bidi must work. Do not design a mirrored RTL interface yet, but do not make it impossible later.
+- **Top three screens:** Ely is not sure. Working assumption from how the app is used: **Overview, Review, Upload/Files**. Give these the most care, then Wealth and Trips.
+
+### What phone changes mean for the design (technical note)
+
+Today the phone page is a read-only snapshot hosted in Google Apps Script, and the real app and database run on Ely's computer. So an action taken on the phone cannot change data directly when the computer is off. Design for these states:
+- **Computer reachable** (live app over the private link): the action applies immediately.
+- **Computer not reachable:** the action is **queued** on the phone page and shown as "waiting for your computer", then applied the next time the app is open. Show queued actions clearly and let them be cancelled.
+- "Check Drive for new files" from the phone is the same: it is a request that the computer runs when it is on. Show its result ("3 files added, 12 lines to review") when it comes back.
+- Approvals from the phone should be small and reversible (approve a suggestion, change a category, leave out a payment), never destructive (no delete, restore or close-month from the phone).
 
 ## Appendix: facts that affect design
 
