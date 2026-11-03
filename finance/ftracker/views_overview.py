@@ -239,7 +239,52 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     else:
         win = months_between(frm, to) if mode == "custom" else [x for x in months if x <= end][-int(mode):]
         body = _period_view(conn, ctx, d, win, owner, base, mode, q)
-    return layout(conn, ctx, "/", "Overview", f"<h1>Overview</h1>{notice}{controls}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
+    head = f'<div class="pagehead"><h1>Overview</h1></div>{notice}{controls}'
+    if mode != "month":
+        return layout(conn, ctx, "/", "Overview", f"{head}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
+    side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
+    return layout(conn, ctx, "/", "Overview", f'{head}{_dataline(conn, ctx.today)}<div class="ov"><div class="ovmain">{body}</div><aside class="ovside">{side}</aside></div>')
+
+
+def _statements_card(conn, ctx, m: str) -> str:
+    """This month's statements at a glance: which are in and which are still to come."""
+    if ctx.readonly:
+        return ""
+    try:
+        cl = expected.checklist(conn, ctx.today)
+    except Exception:
+        return ""
+    month = next((b for b in cl["by_month"] if b["key"] == m), None)
+    if not month:
+        return ""
+    rows = []
+    for g in month["groups"]:
+        for i in g["items"]:
+            if i.get("children"):
+                continue
+            ok = i["status"] == "done"
+            tone = "ok" if ok else ("warn" if i["status"] == "todo" else "")
+            word = {"done": "In", "todo": "Missing", "waiting": "Not due yet", "optional": "Optional"}.get(i["status"], i["status"])
+            rows.append(f'<div class="strow"><span dir="auto">{esc(i["label"])}</span><span class="{tone}">{word}</span></div>')
+    if not rows:
+        return ""
+    return (f'<section class="card sidecard"><h4>{esc(month_label(m))} statements</h4>{"".join(rows)}'
+            '<p class="cap" style="margin:8px 0 0"><a href="/files">Where every file went</a></p></section>')
+
+
+def _networth_card(conn, ctx) -> str:
+    from .views import _net_worth_series
+    pts, no_rate = _net_worth_series(conn, "ILS")
+    if not pts:
+        return ""
+    last = pts[-1]
+    prev = pts[-2] if len(pts) > 1 else None
+    delta = ""
+    if prev:
+        diff = last[1] - prev[1]
+        delta = f'<div class="cap {"down" if diff >= 0 else "up"}">{"+" if diff >= 0 else "−"}{money(abs(diff))} since {esc(dmy(prev[0]))}</div>'
+    return (f'<a class="card sidecard nwcard" href="/wealth"><h4>Net worth</h4><div class="mono big">{money(last[1])}</div>{delta}'
+            f'<div class="cap">as of {esc(dmy(last[0]))}</div></a>')
 
 
 def _vituri_note(conn, ctx, base, d, mode, m, end, frm, to) -> str:
@@ -360,8 +405,23 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
               if inc_rows else "")
     fixed = insights.fixed_costs(conn, m, d["months"], owner)
     odd = insights.unusual(conn, m, d["months"], owner, fixed)
-    return (f'{note}{_tiles(inc, exp, inv)}{_pace(conn, ctx, d, m, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
+    return (f'{note}{_tiles(inc, exp, inv)}{_confirm_band(conn, m)}{_pace(conn, ctx, d, m, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
             f'<div class="cats">{head}{"".join(rows)}{foot}</div>{_budget_month(conn, ctx, spend, owner)}{_worth_a_look(ctx, odd, cats, back, m)}{_fixed_card(fixed, m)}{income}')
+
+
+def _confirm_band(conn, m: str) -> str:
+    """How much of the month is confirmed by you and how much is still the app's guess."""
+    r = conn.execute("""SELECT SUM(CASE WHEN t.category_status = 'approved' THEN 1 ELSE 0 END) AS ok,
+                               SUM(CASE WHEN t.category_status = 'proposed' THEN 1 ELSE 0 END) AS guess
+                        FROM transactions t JOIN batches b ON b.id = t.batch_id
+                        WHERE t.budget_month = ? AND t.kind NOT IN ('transfer')""", (m,)).fetchone()
+    ok, guess = (r["ok"] or 0), (r["guess"] or 0)
+    if not (ok or guess):
+        return ""
+    pct = 100 * ok / (ok + guess)
+    link = ' · <a href="/review">Review them</a>' if guess else ""
+    return (f'<div class="band" role="status"><div class="bar" aria-hidden="true"><span style="width:{pct:.1f}%"></span></div>'
+            f'<div><span class="mono">{ok}</span> confirmed · <span class="mono">{guess}</span> guessed by the app{link}</div></div>')
 
 
 def _worth_a_look(ctx, odd, cats, back, month=None) -> str:

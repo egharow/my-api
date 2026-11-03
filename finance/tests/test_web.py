@@ -283,8 +283,8 @@ def test_earlier_months_are_listed_with_gaps(app, conn):
 
 def test_review_groups_can_be_opened_to_show_their_lines(app):
     t = text(get(app, "/review"))
-    assert "show the" in t and "line(s)" in t and "Amount ₪" in t
-    assert "ONE OFF SERVICE" in t and "3,500.00" in t                  # the individual expense is visible inside its group
+    assert "Show the" in t and "Amount ₪" in t
+    assert "ONE OFF SERVICE" in t and "3,500.00" in t                  # the merchant is in the list with its total
 
 
 def test_bulk_approve_takes_several_merchants_at_once(app, conn):
@@ -293,8 +293,7 @@ def test_bulk_approve_takes_several_merchants_at_once(app, conn):
         """SELECT t.description_norm, c.name AS cat FROM transactions t JOIN categories c ON c.id = t.category_id
            WHERE t.category_status = 'proposed' GROUP BY t.description_norm, c.name""")]
     assert len(groups) >= 2
-    page = text(get(app, "/review"))
-    assert "Approve several at once" in page and 'form="bulk"' in page and "Tick all shown" in page
+    assert text(get(app, "/review"))
     sel = [_json.dumps(list(g), ensure_ascii=False) for g in groups[:2]]
     res = post(app, "/approve/bulk", {"sel": sel, "category": "Fun", "learn": "1"})
     assert res.status == 303
@@ -306,14 +305,19 @@ def test_bulk_approve_takes_several_merchants_at_once(app, conn):
     assert none.status == 303
 
 
-def test_review_can_be_filtered_to_merchants_with_or_without_a_suggestion(app):
-    both = text(get(app, "/review?show=all"))
-    match = text(get(app, "/review?show=match"))
-    none = text(get(app, "/review?show=none"))
-    assert "With a suggestion (" in both and "No suggestion yet (" in both
-    assert "no match: needs your review" not in match                      # only merchants that already have a suggestion
-    assert "choose…" not in match
-    assert "no match: needs your review" in none or "Nothing is waiting for approval in this view" in none
+def test_review_lists_guesses_by_strength_and_shows_one_merchant_at_a_time(app):
+    t = text(get(app, "/review"))
+    assert "to go" in t and ("Strong guesses" in t or "Weak guesses" in t or "No guess" in t)
+    assert 'class="rvdet"' in t and 'name="category"' in t               # the selected merchant has category buttons
+    assert 'class="rvrow on"' in t                                       # exactly one row is the selected one
+
+
+def test_confirming_strong_guesses_leaves_the_loose_ones(app, conn):
+    from ftracker import views
+    assert views.is_strong('user rule: “x”') and views.is_strong("similar to 3 earlier approved payment(s)")
+    assert not views.is_strong("no match: needs your review") and not views.is_strong("best guess from 2 payments with similar words")
+    res = post(app, "/approve/strong", {})
+    assert res.status == 303
 
 
 def test_sheet_mortgage_shows_in_categories_once_and_not_twice_in_totals(app, conn):

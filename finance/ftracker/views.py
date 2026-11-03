@@ -1,6 +1,7 @@
 """HTML pages. Every function takes an open connection and returns a string, so they are easy to test."""
 import json
 import sqlite3
+from urllib.parse import quote
 from dataclasses import dataclass, field
 from html import escape as esc
 
@@ -284,6 +285,51 @@ a{color:var(--accent)}
 .tabs{display:none}
 .moregrid{display:grid;gap:0;background:var(--surface);border-top:2px solid var(--rule)}
 .moregrid a{display:flex;align-items:center;gap:14px;min-height:56px;padding:0 16px;border-bottom:1px solid var(--grid);color:var(--ink);text-decoration:none}
+/* page head and the Review screen */
+.pagehead{display:flex;flex-wrap:wrap;align-items:center;gap:10px 24px;margin:6px 0 16px}
+.pagehead h1{margin:0;font-size:22px;font-weight:600;letter-spacing:0}
+.pagehead .sub{flex:1 1 auto;color:var(--muted)}
+.mono{font-family:var(--num);font-variant-numeric:tabular-nums}
+.rv{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.rvlist{flex:1 1 440px;min-width:0;background:var(--surface)}
+.rvh{display:flex;justify-content:space-between;padding:12px 20px 8px;border-bottom:1px solid var(--rule);font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink2)}
+.rvrow{display:grid;grid-template-columns:48px minmax(0,1fr) auto 100px;gap:12px;align-items:center;min-height:44px;padding:0 20px;border-bottom:1px solid var(--grid);color:var(--ink);text-decoration:none}
+.rvrow:hover{background:color-mix(in srgb,var(--ink) 4%,transparent)}
+.rvrow.on{background:color-mix(in srgb,var(--accent) 10%,transparent);box-shadow:inset 0 0 0 1px var(--accent)}
+.rvrow .d{font-size:13px;color:var(--muted)}.rvrow .m{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rvrow .gc{font-size:13px;border:1px dashed var(--axis);padding:1px 8px;white-space:nowrap}.rvrow .gc.none{border:0;color:#8a5a00}
+.rvrow .n{text-align:right}
+.rvmore{padding:10px 20px;font-size:13px;border-bottom:1px solid var(--grid)}
+.rvdet{flex:1 1 480px;min-width:0;background:var(--surface);border-top:2px solid var(--rule);padding:20px 24px 24px;position:sticky;top:12px}
+.rvdet .rvtop{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:14px}
+.rvdet h2{margin:8px 0 0;font-size:24px;font-weight:600}
+.rvdet .amt{font-size:34px;font-weight:500;letter-spacing:-.02em}
+.rvdet .why{margin:14px 0 4px;color:var(--ink2);font-size:14px}
+.cgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.cbtn{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;text-align:left;font-weight:400;font-size:15px;background:var(--surface)!important;color:var(--ink)!important;border:1px solid var(--border)!important}
+.cbtn.guess{border:1px dashed var(--axis)!important}
+.cbtn:hover{border-color:var(--ink)!important}
+.cbtn .k{font-family:var(--num);font-size:12px;color:var(--muted)}
+.cother select{width:100%;height:44px}
+.learn{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px}
+.rvact{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.rvact .primary{height:44px;padding:0 20px;flex:1 1 200px}
+.rvact .btnlink{height:44px;display:inline-flex;align-items:center;padding:0 16px}
+.rvlines{margin-top:16px}
+.keys kbd{font-family:var(--num);border:1px solid var(--axis);padding:0 5px}
+@media (max-width:820px){.rvdet{position:static}.cgrid{grid-template-columns:repeat(2,minmax(0,1fr))}.rvrow{grid-template-columns:44px minmax(0,1fr) 88px}.rvrow .gc{display:none}}
+/* overview: a main column and a column of things to look at */
+.ov{display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.ovmain{flex:999 1 560px;min-width:0}
+.ovside{flex:1 1 300px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.ovside .card,.ovside .banner{margin:0!important}
+.sidecard h4{margin:0 0 8px;font-size:15px;font-weight:600}
+.strow{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--grid);font-size:14px}
+.strow .ok{color:var(--goodtext)}.strow .warn{color:#8a5a00;font-weight:600}
+.nwcard{display:block;color:var(--ink);text-decoration:none}.nwcard .big{font-size:26px;font-weight:500;letter-spacing:-.02em}
+.nwcard:hover{border-color:var(--ink)}
+.band{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;padding:12px 18px;background:var(--surface);border:1px solid var(--border);border-top:0;font-size:13px;color:var(--ink2)}
+.band .bar{flex:1 1 240px;height:6px;background:var(--grid)}.band .bar span{display:block;height:6px;background:var(--ink)}
 @media (max-width:820px){
  .side{display:none}
  .tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);border-top:1px solid var(--border);padding:6px 4px calc(10px + env(safe-area-inset-bottom))}
@@ -571,28 +617,34 @@ def _goal_card(p: dict) -> str:
             f'{charts.progress_bar(p["percent"], p["status"])}<small>{"<br>".join(lines)}</small></div>')
 
 
+STRONG_BASIS = ("user rule", "learned rule", "builtin rule", "similar to", "approved by itself")
+
+
+def is_strong(basis: str | None) -> bool:
+    """A suggestion backed by a rule or by earlier payments, as against a loose guess."""
+    b = (basis or "").lower()
+    return any(k in b for k in (" rule:", "similar to", "approved by itself"))
+
+
 def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     groups = conn.execute(
         """SELECT t.description_norm AS key, MIN(t.description) AS description, COUNT(*) AS n,
-                  ROUND(SUM(-t.amount), 2) AS total, c.name AS proposed, MIN(t.proposal_basis) AS basis
+                  ROUND(SUM(-t.amount), 2) AS total, c.name AS proposed, MIN(t.proposal_basis) AS basis,
+                  MIN(t.txn_date) AS first, MAX(t.txn_date) AS last
            FROM transactions t JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
            WHERE t.category_status = 'proposed' AND b.status != 'committed'
            GROUP BY t.description_norm, c.name ORDER BY ABS(SUM(t.amount)) DESC""").fetchall()
-    n_match = sum(1 for g in groups if g["proposed"] != "Uncategorised")
-    n_none = len(groups) - n_match
-    show = q.get("show") if q.get("show") in ("match", "none", "all") else ("match" if n_match else "all")
-    groups = [g for g in groups if show == "all" or (g["proposed"] != "Uncategorised") == (show == "match")][:300]
-    cats = conn.execute("SELECT name FROM categories WHERE name != 'Uncategorised' ORDER BY kind, name").fetchall()
-    lines_by: dict[tuple, list] = {}
-    for r in conn.execute(
-            """SELECT t.description_norm AS key, c.name AS cat, t.txn_date, t.budget_month, t.description, -t.amount AS spent, a.label AS account
-               FROM transactions t JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
-               JOIN accounts a ON a.id = t.account_id
-               WHERE t.category_status = 'proposed' AND b.status != 'committed' ORDER BY t.txn_date DESC, t.id DESC"""):
-        lines_by.setdefault((r["key"], r["cat"]), []).append(r)
-    out = ["<h1>Review categories</h1>",
-           '<p class="muted">Each line is a merchant. The proposed category is a suggestion: approve it or pick another. '
-           "Tick “remember” and the app will use your choice for this merchant from now on.</p>"]
+    strong = [g for g in groups if g["proposed"] != "Uncategorised" and is_strong(g["basis"])]
+    weak = [g for g in groups if g["proposed"] != "Uncategorised" and not is_strong(g["basis"])]
+    none = [g for g in groups if g["proposed"] == "Uncategorised"]
+    ordered = strong + weak + none
+    lines_total = sum(g["n"] for g in groups)
+    out = []
+    quick = ""
+    if strong and not ctx.readonly:
+        quick = _form(ctx, "/approve/strong", f'<button class="quiet">Confirm {len(strong)} strong guess{"es" if len(strong) != 1 else ""}</button>', "inline")
+    out.append(f'<div class="pagehead"><h1>Review</h1><div class="sub"><span class="mono">{len(groups)}</span> merchant{"s" if len(groups) != 1 else ""} to go '
+               f'· <span class="mono">{lines_total}</span> line{"s" if lines_total != 1 else ""}</div>{quick}</div>')
     auto = conn.execute(
         """SELECT t.description_norm AS k, MIN(t.description) AS d, c.name AS cat, COUNT(*) AS n FROM transactions t
            JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id
@@ -605,52 +657,96 @@ def review(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
                    'open its category on Overview and change it.</p><ul>'
                    + "".join(f'<li dir="auto"><bdi dir="auto">{esc(a["d"])}</bdi> → {esc(a["cat"])} <span class="cap">({a["n"]})</span></li>' for a in auto[:60])
                    + "</ul></details>")
-    tab = lambda key, label, n: (f'<a href="/review?show={key}"{" style=font-weight:700" if show == key else ""}>{label} ({n})</a>')
-    out.append(f'<p>{tab("match", "With a suggestion", n_match)} &nbsp;·&nbsp; {tab("none", "No suggestion yet", n_none)} &nbsp;·&nbsp; '
-               f'{tab("all", "Everything", n_match + n_none)}</p>')
-    if not groups:
-        out.append('<div class="card">Nothing is waiting for approval in this view.</div>')
-    rows = []
-    for g in groups:
-        opts = "".join(f'<option{" selected" if c[0] == g["proposed"] else ""}>{esc(c[0])}</option>' for c in cats)
-        if g["proposed"] == "Uncategorised":
-            opts = "<option value=\"\" selected disabled>choose…</option>" + opts
-        form = _form(ctx, "/approve",
-                     f'<input type="hidden" name="key" value="{esc(g["key"])}"><select name="category" required>{opts}</select> '
-                     f'<label><input type="checkbox" name="learn" value="1" checked> remember</label> <button>Approve</button>', "row")
-        flow = f'{money(abs(g["total"]), "ILS", 2)} in' if g["total"] < 0 else f'{money(g["total"], "ILS", 2)} out'
-        lines = lines_by.get((g["key"], g["proposed"]), [])
-        detail = ""
-        if lines:
-            body = "".join(f'<tr><td>{esc(dmy(l["txn_date"]))}</td><td dir="auto">{esc(l["description"])}</td><td dir="auto" class="muted">{esc(l["account"])}</td>'
-                           f'<td class="n">{l["spent"]:,.2f}</td></tr>' for l in lines[:100])
-            more = f'<small>Showing the newest 100 of {len(lines)}.</small>' if len(lines) > 100 else ""
-            detail = (f'<details dir="ltr"><summary class="muted">show the {len(lines)} line(s)</summary><table><thead><tr><th>Date</th><th>Description</th>'
-                      f'<th>Account</th><th class="n">Amount ₪</th></tr></thead><tbody>{body}</tbody></table>{more}</details>')
-        pick = esc(json.dumps([g["key"], g["proposed"]], ensure_ascii=False))
-        rows.append(f'<tr><td><input type="checkbox" form="bulk" name="sel" value="{pick}" class="sel" data-ok="{0 if g["proposed"] == "Uncategorised" else 1}" '
-                    f'aria-label="Select {esc(g["description"])}"></td>'
-                    f'<td dir="auto">{esc(g["description"])}{detail}</td><td class="n">{g["n"]}</td><td class="n">{esc(flow)}</td>'
-                    f'<td>{form}<small>{esc(g["basis"] or "")}</small></td></tr>')
-    if rows:
-        bulk_opts = '<option value="">each one\'s proposed category</option>' + "".join(f"<option>{esc(c[0])}</option>" for c in cats)
-        sugg = n_match
-        quick = (_form(ctx, "/approve/suggested", f'<button>Approve all {sugg} suggestions</button> '
-                       '<span class="cap">One click. Every merchant that has a suggested category gets it. The ones with no suggestion stay for you.</span>', "row")
-                 if sugg and show != "none" else "")
-        out.append(f'<div class="card" style="margin-bottom:12px">{quick}<b>Approve several at once</b> '
-                   '<form id="bulk" method="post" action="/approve/bulk" class="row" style="margin-top:6px">'
-                   f'<input type="hidden" name="csrf" value="{esc(ctx.csrf)}">'
-                   f'<select name="category">{bulk_opts}</select> '
-                   '<label><input type="checkbox" name="learn" value="1" checked> remember</label> '
-                   '<button>Approve ticked</button> '
-                   '<button type="button" class="quiet" onclick="document.querySelectorAll(\'.sel\').forEach(function(c){c.checked=c.dataset.ok==\'1\'})">Tick all shown</button> '
-                   '<button type="button" class="quiet" onclick="document.querySelectorAll(\'.sel\').forEach(function(c){c.checked=false})">Clear</button>'
-                   '</form><p class="muted" style="margin:6px 0 0">Tick merchants in the list, then approve them together. '
-                   "Leave the category on “each one's proposed category” to accept every suggestion as it is, or pick one category to give them all.</p></div>")
-        out.append('<div class="card"><div style="overflow-x:auto"><table><thead><tr><th style="width:2em"></th><th>Merchant</th><th class="n">Lines</th><th class="n">Money</th>'
-                   f'<th>Category</th></tr></thead><tbody>{"".join(rows)}</tbody></table></div></div>')
+    if not ordered:
+        out.append('<div class="card">Nothing is waiting for review. ✔</div>')
+        return layout(conn, ctx, "/review", "Review", "".join(out))
+
+    keys = [g["key"] + "\x1f" + g["proposed"] for g in ordered]
+    want = q.get("k") or ""
+    idx = keys.index(want) if want in keys else 0
+    cur = ordered[idx]
+    nxt = keys[(idx + 1) % len(keys)]
+
+    def row(g, k):
+        on = k == keys[idx]
+        label = ("No guess" if g["proposed"] == "Uncategorised" else g["proposed"])
+        cls = "rvrow on" if on else "rvrow"
+        return (f'<a class="{cls}" href="/review?k={esc(quote(k))}"{" aria-current=true" if on else ""}>'
+                f'<span class="mono d">{esc(dmy(g["last"])[:5])}</span><span class="m"><bdi dir="auto">{esc(g["description"])}</bdi>'
+                + (f'<span class="cap"> ×{g["n"]}</span>' if g["n"] > 1 else "") + "</span>"
+                f'<span class="gc{" none" if g["proposed"] == "Uncategorised" else ""}">{esc(label)}</span>'
+                f'<span class="mono n">{money(abs(g["total"]), "ILS", 2)}</span></a>')
+
+    show_all = q.get("all") == "1"
+    LIMIT = 40
+    sections = []
+    offset = 0
+    for title, grp in (("Strong guesses", strong), ("Weak guesses", weak), ("No guess", none)):
+        if not grp:
+            offset += 0
+            continue
+        shown = grp if show_all else grp[:LIMIT]
+        # always keep the selected row visible
+        if not show_all and cur in grp and cur not in shown:
+            shown = shown + [cur]
+        rows_html = "".join(row(g, g["key"] + "\x1f" + g["proposed"]) for g in shown)
+        more = (f'<div class="rvmore"><a href="/review?all=1&k={esc(quote(keys[idx]))}">{len(grp) - len(shown)} more</a></div>' if len(shown) < len(grp) else "")
+        sections.append(f'<div class="rvh"><span>{title}</span><span class="mono">{len(grp)}</span></div>{rows_html}{more}')
+    left = f'<section class="rvlist" aria-label="Merchants to review">{"".join(sections)}</section>'
+
+    # the detail pane for the selected merchant
+    lines = conn.execute(
+        """SELECT t.txn_date, t.description, -t.amount AS spent, a.label AS account FROM transactions t
+           JOIN categories c ON c.id = t.category_id JOIN batches b ON b.id = t.batch_id JOIN accounts a ON a.id = t.account_id
+           WHERE t.category_status = 'proposed' AND b.status != 'committed' AND t.description_norm = ? AND c.name = ?
+           ORDER BY t.txn_date DESC, t.id DESC""", (cur["key"], cur["proposed"])).fetchall()
+    used = [r[0] for r in conn.execute(
+        """SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id
+           WHERE t.category_status = 'approved' AND c.name != 'Uncategorised' AND c.kind = 'expense'
+           GROUP BY c.name ORDER BY COUNT(*) DESC LIMIT 12""")] if True else []
+    all_cats = [r[0] for r in conn.execute("SELECT name FROM categories WHERE name != 'Uncategorised' ORDER BY kind, name")]
+    guess = cur["proposed"] if cur["proposed"] != "Uncategorised" else None
+    choices = ([guess] if guess else []) + [c for c in used if c != guess]
+    choices = choices[:8]
+    rest = [c for c in all_cats if c not in choices]
+    btns = []
+    for n, c in enumerate(choices, 1):
+        btns.append(f'<button name="category" value="{esc(c)}" class="cbtn{" guess" if c == guess else ""}" data-n="{n}"><span class="k">{n}</span><span dir="auto">{esc(c)}</span></button>')
+    other = ('<select name="other" onchange="if(this.value){var f=this.form;var h=document.createElement(\'input\');h.type=\'hidden\';h.name=\'category\';h.value=this.value;f.appendChild(h);f.submit()}">'
+             '<option value="">Other…</option>' + "".join(f"<option>{esc(c)}</option>" for c in rest) + "</select>")
+    form = _form(ctx, "/approve",
+                 f'<input type="hidden" name="key" value="{esc(cur["key"])}">'
+                 f'<div class="cgrid">{"".join(btns)}<div class="cother">{other}</div></div>'
+                 '<label class="learn"><input type="checkbox" name="learn" value="1" checked> Use this category for this merchant from now on</label>'
+                 + (f'<div class="rvact"><button name="category" value="{esc(guess)}" class="primary" data-n="enter">Confirm {esc(guess)} <span class="mono">↵</span></button>'
+                    if guess else '<div class="rvact">')
+                 + f'<a class="btnlink" href="/review?k={esc(quote(nxt))}">Later <span class="mono">L</span></a></div>')
+    line_rows = "".join(f'<tr><td class="mono">{esc(dmy(l["txn_date"]))}</td><td dir="auto">{esc(l["description"])}</td>'
+                        f'<td dir="auto" class="muted">{esc(l["account"])}</td><td class="n">{l["spent"]:,.2f}</td></tr>' for l in lines[:30])
+    more_lines = f'<p class="cap">Showing the newest 30 of {len(lines)}.</p>' if len(lines) > 30 else ""
+    why = esc(cur["basis"] or "No similar payment found yet.")
+    flow = f'{money(abs(cur["total"]), "ILS", 2)} {"in" if cur["total"] < 0 else "out"}'
+    sample = lines[0]["account"] if lines else ""
+    detail = (f'<section class="rvdet" aria-label="Selected merchant">'
+              f'<div class="rvtop"><span>{esc(dmy(cur["first"]))}{" to " + esc(dmy(cur["last"])) if cur["first"] != cur["last"] else ""}</span><span>{esc(sample)}</span></div>'
+              f'<h2 dir="auto"><bdi dir="auto">{esc(cur["description"])}</bdi></h2>'
+              f'<div class="amt mono">{esc(flow)}</div><div class="cap">{cur["n"]} line{"s" if cur["n"] != 1 else ""}</div>'
+              f'<div class="why">{("The app guessed <b>" + esc(guess) + "</b>. " if guess else "")}{why}</div>'
+              + ("" if ctx.readonly else form)
+              + f'<details class="rvlines"><summary>Show the {len(lines)} line{"s" if len(lines) != 1 else ""}</summary><div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Description</th><th>Account</th><th class="n">Amount ₪</th></tr></thead>'
+              f'<tbody>{line_rows}</tbody></table></div>{more_lines}</details></section>')
+    out.append(f'<div class="rv">{left}{detail}</div>')
+    out.append('<p class="keys cap"><kbd>J</kbd> <kbd>K</kbd> move · <kbd>1</kbd>–<kbd>9</kbd> pick a category · <kbd>↵</kbd> confirm the guess · <kbd>L</kbd> later</p>')
+    out.append(f"<script>{REVIEW_JS}</script>")
     return layout(conn, ctx, "/review", "Review", "".join(out))
+
+
+REVIEW_JS = """(function(){var rows=[].slice.call(document.querySelectorAll('.rvrow'));var cur=rows.findIndex(function(r){return r.classList.contains('on')});
+document.addEventListener('keydown',function(e){var t=e.target&&e.target.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA'||e.metaKey||e.ctrlKey||e.altKey)return;
+var k=e.key;if(k==='j'||k==='J'){if(rows[cur+1])location=rows[cur+1].href}else if(k==='k'||k==='K'){if(rows[cur-1])location=rows[cur-1].href}
+else if(k==='l'||k==='L'){var l=document.querySelector('.rvact .btnlink');if(l)location=l.href}
+else if(k==='Enter'){var p=document.querySelector('button.primary');if(p){e.preventDefault();p.click()}}
+else if(/^[1-9]$/.test(k)){var b=document.querySelector('button.cbtn[data-n="'+k+'"]');if(b)b.click()}});})();"""
 
 
 def items(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
