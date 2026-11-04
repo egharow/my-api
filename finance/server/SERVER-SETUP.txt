@@ -1,0 +1,156 @@
+FINANCE APP ON AN ALWAYS-ON SERVER (Oracle Cloud free tier + Tailscale)
+=====================================================================
+
+What you get: the whole app on your phone and computer, from anywhere, with the
+computer switched off. Statements dropped in your Google Drive folder are picked
+up and imported by the server about every 10 minutes. Backups go back to Drive.
+
+Nobody can reach the server from the internet. Only your own devices, through
+Tailscale, can open it, and then they still sign in with a name and password.
+
+You do this once. It takes about an hour. Nothing here changes your computer's
+copy until step 7.
+
+
+1. MAKE THE SERVER (Oracle Cloud, "Always Free")
+------------------------------------------------
+- Sign up at cloud.oracle.com. A card is needed to verify you; the Always Free
+  resources below are not charged. Choose a home region near you and keep it.
+- Compute > Instances > Create instance.
+    Image:   Ubuntu 22.04 (or 24.04)
+    Shape:   VM.Standard.E2.1.Micro  (AMD, Always Free)
+             If it says out of capacity, try again later or use VM.Standard.A1.Flex
+             with 1 OCPU and 6 GB.
+    Network: keep the defaults. Do NOT open any extra ports. The app is only
+             reached through Tailscale.
+    SSH keys: let Oracle make a key pair and download the private key. Keep it safe.
+- When it is running, note the "Public IP address". You use it once, to log in.
+
+
+2. LOG IN AND INSTALL
+---------------------
+On your Windows computer, open PowerShell:
+
+    scp -i "C:\path\to\your-oracle-key.key" FinanceServer.zip ubuntu@PUBLIC_IP:/home/ubuntu/
+    ssh -i "C:\path\to\your-oracle-key.key" ubuntu@PUBLIC_IP
+
+On the server:
+
+    unzip -o FinanceServer.zip -d FinanceServer
+    bash FinanceServer/server/install.sh
+
+When it ends with "The app is running." go on.
+
+
+3. CONNECT TAILSCALE
+--------------------
+- In the Tailscale admin page (login.tailscale.com) > DNS: turn on "HTTPS Certificates".
+- On the server:
+
+    sudo tailscale up
+    (open the link it shows and sign in with the same Tailscale account you use elsewhere)
+    sudo tailscale serve --bg 8765
+    sudo tailscale serve status
+
+  The last command shows an address like  https://finance.tail1234.ts.net
+  Write it down. That is the address of your app.
+- Tell the app its own name. Edit the settings file:
+
+    sudo nano /etc/finance.env
+
+  and set:   FINANCE_ALLOWED_HOSTS=finance.tail1234.ts.net   (no https://)
+  Save, then:   sudo systemctl restart finance
+- Install Tailscale on your phone and on your computer too (same account).
+  Open the address from step 3 in the phone browser, then "Add to Home screen".
+
+
+4. ADD YOURSELF AND SHIR
+------------------------
+    finance user add Ely
+    finance user add Shir
+
+Each asks for a password (at least 10 characters). The names should match the
+owners in the app (Ely, Shir), so changes are recorded as yours.
+Other commands:  finance user list    finance user remove Shir
+
+
+5. CONNECT GOOGLE DRIVE
+-----------------------
+rclone, a well-known free tool, does the copying. You sign in to Google once.
+
+a) On your Windows computer, download rclone from rclone.org/downloads (Windows
+   zip), unzip it, open PowerShell in that folder and run:
+
+       .\rclone authorize "drive"
+
+   A browser opens. Sign in to Google and allow access. PowerShell then prints a
+   block starting with {"access_token": ... }. Copy that whole line.
+
+b) On the server (keep the quotes around the pasted text):
+
+       sudo -u finance env HOME=/opt/finance rclone config create gdrive drive scope=drive token='PASTE_THE_WHOLE_LINE_HERE'
+
+c) Check it can see your folders:
+
+       sudo -u finance env HOME=/opt/finance rclone lsd gdrive:
+
+d) Tell the app which Drive folders to use. Edit the settings file again:
+
+       sudo nano /etc/finance.env
+
+       FINANCE_DRIVE_IN=gdrive:Statements         (the Drive folder you drop statements in)
+       FINANCE_DRIVE_OUT=gdrive:Finance           (a Drive folder for backups; it is created)
+
+   Save, then:  sudo systemctl restart finance
+   Test one round now:   finance drive-sync
+
+
+6. COPY YOUR DATA OVER (once)
+-----------------------------
+The app's data is the my-data folder next to Finance.pyw on your computer.
+FIRST close the app on your computer. Then, from PowerShell in the folder that
+holds my-data (use the Tailscale name of the server, or the public IP):
+
+    scp -i "C:\path\to\your-oracle-key.key" -r my-data ubuntu@PUBLIC_IP:/home/ubuntu/
+
+On the server:
+
+    sudo systemctl stop finance
+    sudo rsync -a /home/ubuntu/my-data/ /opt/finance/data/
+    sudo chown -R finance:finance /opt/finance/data
+    sudo systemctl start finance
+
+Open the address from step 3, sign in, and check the Overview matches what you
+saw on your computer (same months, same totals, same count in Review).
+
+
+7. SWITCH OVER
+--------------
+From now on the server holds the real data. Do not open Finance.pyw on your
+computer any more, or the two copies will drift apart. Keep my-data on the
+computer as an old backup for a while.
+
+To use it: open the address, sign in. Drop statements in your Drive folder, or use
+Add statements in the app. New files appear within about 10 minutes, or press
+"Check the folder now" on the Add statements page to do it at once.
+
+
+UPDATING THE APP LATER
+----------------------
+I will send a new FinanceServer.zip. Then:
+
+    scp ... FinanceServer.zip ubuntu@SERVER:/home/ubuntu/
+    unzip -o FinanceServer.zip -d FinanceServer
+    bash FinanceServer/server/install.sh
+
+Your data and settings are not touched.
+
+
+IF SOMETHING GOES WRONG
+-----------------------
+    sudo systemctl status finance
+    sudo journalctl -u finance -n 80
+    tail -50 /opt/finance/data/error-log.txt
+
+Restore from a backup: backups are in /opt/finance/data/backups and in Drive
+(Finance/FinanceBackup). Send me the lines above and I will tell you the next step.

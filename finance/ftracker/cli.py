@@ -216,6 +216,16 @@ def cmd_export(args):
     print("Upload it to Google Drive and open it as a Google Sheet, or File > Import into the shared sheet.")
 
 
+def cmd_drive_sync(args):
+    from . import driveserver
+    home = resolve_home(args.home); home.ensure()
+    conn = connect(home.db_path)
+    try:
+        print(driveserver.cycle(conn, home, date.today(), force=True) or "Nothing new.")
+    finally:
+        conn.close()
+
+
 def cmd_user(args):
     import getpass
     from . import servermode
@@ -248,7 +258,8 @@ def cmd_serve(args):
     home = resolve_home(args.home)
     import os
     hosts = tuple(args.allow_host or []) + tuple(h for h in os.environ.get("FINANCE_ALLOWED_HOSTS", "").split(",") if h.strip())
-    web.serve(home, args.port, args.lan, args.pin, not args.no_browser and not args.server, server=args.server, allow_hosts=hosts)
+    web.serve(home, args.port, args.lan, args.pin, not args.no_browser and not args.server, server=args.server, allow_hosts=hosts,
+              drive_in=args.drive_in or os.environ.get("FINANCE_DRIVE_IN"), drive_out=args.drive_out or os.environ.get("FINANCE_DRIVE_OUT"))
 
 
 def cmd_first_run(args):
@@ -455,7 +466,10 @@ def build_parser():
     s.add_argument("--pin"); s.add_argument("--no-browser", action="store_true")
     s.add_argument("--server", action="store_true", help="always-on server: sign-in for each person, listens on this machine only (put Tailscale in front)")
     s.add_argument("--allow-host", action="append", help="the HTTPS name people use, e.g. finance.tailnet-name.ts.net (server mode; repeatable)")
+    s.add_argument("--drive-in", help="rclone path of your Drive statements folder, e.g. gdrive:Statements (server mode)")
+    s.add_argument("--drive-out", help="rclone path where backups go, e.g. gdrive:Finance (server mode)")
     s.set_defaults(fn=cmd_serve)
+    s = sub.add_parser("drive-sync", help="run one Drive round now: fetch new statements, import, back up"); s.set_defaults(fn=cmd_drive_sync)
     s = sub.add_parser("user", help="people who can sign in to the server")
     s.add_argument("action", choices=["add", "list", "remove"]); s.add_argument("name", nargs="?"); s.set_defaults(fn=cmd_user)
     s = sub.add_parser("first-run", help="load the starter setup and seed data next to the app"); s.set_defaults(fn=cmd_first_run)

@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, servermode
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, servermode, driveserver
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -676,6 +676,10 @@ class App:
                 note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
                 return self._redirect("/upload", f"Watching {chosen}. " + (note or "Nothing new to import yet."))
             if path == "/watch/check":
+                if self.server:
+                    ok, err = driveserver.pull(conn, self.home)
+                    if not ok:
+                        return self._redirect("/upload", "Could not read your Drive folder: " + err, err=True)
                 note = watchfolder.scan(conn, self.home, date.fromisoformat(self._today()), force=True)
                 return self._redirect("/upload", note or "Nothing new in the folder.")
             if path == "/screens/install":
@@ -861,9 +865,9 @@ class App:
 
 
 def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = None, open_browser: bool = True,
-          app_mode: bool = False, server: bool = False, allow_hosts: tuple = ()) -> None:
+          app_mode: bool = False, server: bool = False, allow_hosts: tuple = (), drive_in: str | None = None, drive_out: str | None = None) -> None:
     try:
-        _serve(home, port, lan, pin, open_browser, app_mode, server, allow_hosts)
+        _serve(home, port, lan, pin, open_browser, app_mode, server, allow_hosts, drive_in, drive_out)
     except Exception:
         import traceback
         print(traceback.format_exc())            # in app mode this lands in app-log.txt
@@ -872,7 +876,8 @@ def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = Non
         raise
 
 
-def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool, app_mode: bool, server: bool = False, allow_hosts: tuple = ()) -> None:
+def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool, app_mode: bool, server: bool = False, allow_hosts: tuple = (),
+           drive_in: str | None = None, drive_out: str | None = None) -> None:
     home.ensure()
     log = None
     if app_mode:
@@ -904,8 +909,16 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
         try:
             if not servermode.users(c0):
                 print("No one can sign in yet. Add a person first:  python -m ftracker user add Ely")
+            if drive_in or drive_out:
+                driveserver.configure(c0, home, drive_in, drive_out)
+            has_drive = bool(driveserver._get(c0, driveserver.IN_KEY) or driveserver._get(c0, driveserver.OUT_KEY))
         finally:
             c0.close()
+        if has_drive:
+            if not driveserver.available():
+                print("rclone is not installed, so Google Drive is not being read. See SERVER-SETUP.txt.")
+            else:
+                driveserver.start_background(home, connect)
     app = App(home, pin if not phone_pin else None, lan or bool(phone_pin), watchdog=watchdog, phone_pin=phone_pin, port=port,
               server=server, allow_hosts=allow_hosts)
     app.loading = need_load
