@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, servermode
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -50,8 +50,12 @@ LOADING_PAGE = ("<!doctype html><meta charset=utf-8><meta http-equiv=refresh con
 class App:
     def __init__(self, home: Home, pin: str | None = None, lan: bool = False, today: str | None = None,
                  app_dir: Path | None = None, watchdog: "appmode.Watchdog | None" = None, clock=time.time,
-                 phone_pin: str | None = None, port: int = 8765):
+                 phone_pin: str | None = None, port: int = 8765, server: bool = False, allow_hosts: tuple = ()):
         self.home, self.pin, self.lan, self.fixed_today = home, pin, lan, today
+        self.server = server                      # server mode: always-on machine, a named sign-in per person, full access once signed in
+        self.allow_hosts = {h.lower() for h in allow_hosts}
+        self.lockout = servermode.Lockout(clock)
+        self._server_key: bytes | None = None
         self.phone = bool(phone_pin)              # phone mode: this computer is unrestricted, other devices need the PIN and may only look
         if self.phone:
             self.pin, self.lan = phone_pin, True
@@ -79,13 +83,23 @@ class App:
         host = headers.get("host", "").rsplit(":", 1)[0] if not headers.get("host", "").startswith("[") else headers["host"].split("]")[0] + "]"
         client = headers.get("x-client-ip", "")
         remote = bool(client) and client not in ("127.0.0.1", "::1")
-        if (not self.lan or (self.phone and not remote)) and host not in LOCAL_HOSTS:
+        if self.server:
+            if self.allow_hosts and host.lower() not in self.allow_hosts and host not in LOCAL_HOSTS:
+                return _html(421, "<h1>Wrong host</h1>")
+        elif (not self.lan or (self.phone and not remote)) and host not in LOCAL_HOSTS:
             return _html(421, "<h1>Wrong host</h1>")         # blocks DNS-rebinding style access
         cookies = SimpleCookie(headers.get("cookie", ""))
         url = urlparse(raw_path)
         path, q = url.path, {k: v[-1] for k, v in parse_qs(url.query).items()}
+        session_user = None
+        if self.server:
+            res, session_user = self._server_gate(method, path, headers, cookies, body, client)
+            if res is not None:
+                return res
 
-        if self.phone and not remote:
+        if self.server:
+            pass                                                          # signed in above
+        elif self.phone and not remote:
             pass                                                          # this computer: no PIN
         elif self.pin:
             if path == "/login" and method == "POST":
@@ -122,12 +136,14 @@ class App:
         try:
             owners = [r[0] for r in conn.execute("SELECT name FROM owners ORDER BY name")]
             who = unquote(cookies["who"].value) if cookies.get("who") else (owners[0] if owners else "")
+            if session_user and session_user in owners:
+                who = session_user                         # signed in as Ely: payments you change are yours
             flash = unquote(cookies["flash"].value) if cookies.get("flash") else ""
             ctx = views.Ctx(today=self._today(), who=who, csrf=self.csrf, owners=owners,
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
                             data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS,
-                            readonly=remote and self.phone, closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)), screens_waiting=tuple(screens.waiting_names(self.home)))
+                            readonly=remote and self.phone, server=self.server, user=session_user or "", closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)), screens_waiting=tuple(screens.waiting_names(self.home)))
             ph = conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone()
             if ph and conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone():
                 ip = appmode.lan_address()
@@ -186,6 +202,48 @@ class App:
         except Exception:
             import traceback
             print(traceback.format_exc())
+
+    def _server_gate(self, method, path, headers, cookies, body, client):
+        """Server mode: who is this? Returns (response or None, signed-in name or None)."""
+        conn = connect(self.home.db_path)
+        try:
+            if self._server_key is None:
+                self._server_key = servermode.secret(conn)
+            now = self.clock()
+            secure = "; Secure" if headers.get("x-forwarded-proto", "").lower() == "https" else ""
+            user = servermode.read_session(self._server_key, cookies["session"].value if cookies.get("session") else None, now)
+            if user and user not in servermode.users(conn):
+                user = None                                 # the person was removed
+            if path == "/login" and method == "POST":
+                origin = headers.get("origin")
+                if origin and urlparse(origin).netloc != headers.get("host"):
+                    return _html(403, servermode.login_page("That did not come from this page.")), None
+                form = {k: v[-1] for k, v in parse_qs(body.decode("utf-8")).items()}
+                name = (form.get("user") or "").strip()
+                keys = ("u:" + name.lower(), "ip:" + (headers.get("x-forwarded-for", client) or "").split(",")[0].strip())
+                if self.lockout.locked(*keys):
+                    return _html(429, servermode.login_page("Too many wrong tries. Wait 15 minutes.")), None
+                stored = servermode.users(conn).get(name)
+                if servermode.verify_password(form.get("password", ""), stored):
+                    self.lockout.clear(*keys)
+                    tok = servermode.make_session(self._server_key, name, now)
+                    return Response(303, b"", [("Location", "/"), ("Set-Cookie",
+                                    f"session={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age={servermode.SESSION_SECONDS}{secure}")]), name
+                self.lockout.fail(*keys)
+                return _html(403, servermode.login_page("Wrong name or password.")), None
+            if path == "/health":
+                return None, user
+            if not user:
+                if path == "/login":
+                    return _html(200, servermode.login_page()), None
+                return _html(401, servermode.login_page()), None
+            if path == "/login":
+                return Response(303, b"", [("Location", "/")]), user
+            if path == "/logout" and method == "POST":
+                return Response(303, b"", [("Location", "/login"), ("Set-Cookie", f"session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0{secure}")]), None
+            return None, user
+        finally:
+            conn.close()
 
     def _login_page(self, msg: str = "") -> str:
         return (f"<!doctype html><meta charset=utf-8><title>Finance</title><body style='font:16px system-ui;max-width:320px;margin:60px auto'>"
@@ -494,6 +552,8 @@ class App:
             if path == "/seed/dismiss":
                 firstrun.dismiss_notice(conn)
                 return self._redirect("/", "")
+            if path == "/quit" and self.server:
+                return self._redirect("/", "This is the always-on server, so it does not close from here.", err=True)
             if path == "/quit":
                 self.push_phone_now()                     # leave the phone page up to date before closing
                 if self.shutdown:
@@ -801,9 +861,9 @@ class App:
 
 
 def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = None, open_browser: bool = True,
-          app_mode: bool = False) -> None:
+          app_mode: bool = False, server: bool = False, allow_hosts: tuple = ()) -> None:
     try:
-        _serve(home, port, lan, pin, open_browser, app_mode)
+        _serve(home, port, lan, pin, open_browser, app_mode, server, allow_hosts)
     except Exception:
         import traceback
         print(traceback.format_exc())            # in app mode this lands in app-log.txt
@@ -812,7 +872,7 @@ def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = Non
         raise
 
 
-def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool, app_mode: bool) -> None:
+def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool, app_mode: bool, server: bool = False, allow_hosts: tuple = ()) -> None:
     home.ensure()
     log = None
     if app_mode:
@@ -838,7 +898,16 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
     if lan and not pin:
         pin = f"{secrets.randbelow(10 ** 6):06d}"
     watchdog = appmode.Watchdog(time.time()) if app_mode else None
-    app = App(home, pin if not phone_pin else None, lan or bool(phone_pin), watchdog=watchdog, phone_pin=phone_pin, port=port)
+    if server:
+        phone_pin, lan, pin, open_browser = None, False, None, False
+        c0 = connect(home.db_path)
+        try:
+            if not servermode.users(c0):
+                print("No one can sign in yet. Add a person first:  python -m ftracker user add Ely")
+        finally:
+            c0.close()
+    app = App(home, pin if not phone_pin else None, lan or bool(phone_pin), watchdog=watchdog, phone_pin=phone_pin, port=port,
+              server=server, allow_hosts=allow_hosts)
     app.loading = need_load
 
     def load_starting_data():

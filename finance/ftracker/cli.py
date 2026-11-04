@@ -216,10 +216,39 @@ def cmd_export(args):
     print("Upload it to Google Drive and open it as a Google Sheet, or File > Import into the shared sheet.")
 
 
+def cmd_user(args):
+    import getpass
+    from . import servermode
+    home = resolve_home(args.home); home.ensure()
+    conn = connect(home.db_path)
+    try:
+        if args.action == "list":
+            for n in sorted(servermode.users(conn)):
+                print(n)
+            return
+        if not args.name:
+            raise SystemExit("Give a name, for example:  python -m ftracker user add Ely")
+        if args.action == "remove":
+            print("Removed." if servermode.remove_user(conn, args.name) else "No such person.")
+            return
+        pw = getpass.getpass("New password (at least 10 characters): ")
+        if pw != getpass.getpass("Again: "):
+            raise SystemExit("The two passwords differ. Nothing changed.")
+        try:
+            servermode.add_user(conn, args.name, pw)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        print(f"{args.name} can now sign in.")
+    finally:
+        conn.close()
+
+
 def cmd_serve(args):
     from . import web
     home = resolve_home(args.home)
-    web.serve(home, args.port, args.lan, args.pin, not args.no_browser)
+    import os
+    hosts = tuple(args.allow_host or []) + tuple(h for h in os.environ.get("FINANCE_ALLOWED_HOSTS", "").split(",") if h.strip())
+    web.serve(home, args.port, args.lan, args.pin, not args.no_browser and not args.server, server=args.server, allow_hosts=hosts)
 
 
 def cmd_first_run(args):
@@ -423,7 +452,12 @@ def build_parser():
     s.set_defaults(fn=cmd_export)
     s = sub.add_parser("serve"); s.add_argument("--port", type=int, default=8765)
     s.add_argument("--lan", action="store_true", help="let other devices on your home network open it (PIN required)")
-    s.add_argument("--pin"); s.add_argument("--no-browser", action="store_true"); s.set_defaults(fn=cmd_serve)
+    s.add_argument("--pin"); s.add_argument("--no-browser", action="store_true")
+    s.add_argument("--server", action="store_true", help="always-on server: sign-in for each person, listens on this machine only (put Tailscale in front)")
+    s.add_argument("--allow-host", action="append", help="the HTTPS name people use, e.g. finance.tailnet-name.ts.net (server mode; repeatable)")
+    s.set_defaults(fn=cmd_serve)
+    s = sub.add_parser("user", help="people who can sign in to the server")
+    s.add_argument("action", choices=["add", "list", "remove"]); s.add_argument("name", nargs="?"); s.set_defaults(fn=cmd_user)
     s = sub.add_parser("first-run", help="load the starter setup and seed data next to the app"); s.set_defaults(fn=cmd_first_run)
     s = sub.add_parser("app", help="run as an app window (what the desktop icon does)"); s.set_defaults(fn=cmd_app)
     s = sub.add_parser("items"); s.add_argument("--all", action="store_true")

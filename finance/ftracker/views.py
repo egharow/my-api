@@ -31,6 +31,8 @@ class Ctx:
     closed: frozenset = frozenset()  # months you closed
     tags: tuple = ()                 # (id, name) of your trips and tags
     screens_waiting: tuple = ()      # balance screenshots waiting to be checked
+    server: bool = False             # the always-on server: no Quit, a Sign out instead
+    user: str = ""                   # who is signed in (server mode)
 
 
 CSS = """
@@ -482,6 +484,9 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
             groups.append(f'<div class="sg">{"<div class=gt>" + title_ + "</div>" if title_ else ""}{"".join(side_link(*n) for n in links)}</div>')
     flash = f'<div class="flash {"err" if ctx.flash_kind == "err" else ""}" role="status">{esc(ctx.flash)}</div>' if ctx.flash else ""
     quit_form = "" if ctx.readonly else _form(ctx, "/quit", "<button class='quiet quit' title='Close the app'>Quit</button>", "inline")
+    if ctx.server:
+        quit_form = (f'<div class="bk">Signed in as {esc(ctx.user)}</div>'
+                     + _form(ctx, "/logout", "<button class='quiet quit'>Sign out</button>", "inline"))
     theme = ('<div class="theme" role="group" aria-label="Theme">'
              '<button type="button" class="quiet" data-theme-set="light" aria-pressed="false">Light</button>'
              '<button type="button" class="quiet" data-theme-set="dark" aria-pressed="false">Dark</button>'
