@@ -36,7 +36,7 @@ def cash_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
         for r in cash.recent(conn))
     table = (f'<table><thead><tr><th>Day</th><th>What for</th><th>Category</th><th class="n">Amount</th><th></th></tr></thead><tbody>{rows}</tbody></table>'
              if rows else '<p class="muted">Nothing added by hand yet.</p>')
-    return layout(conn, ctx, "/trips", "Cash payments",
+    return layout(conn, ctx, "/cash", "Cash payments",
                   '<h1>Add a payment by hand</h1><p class="muted">For cash and anything that is not on a statement. It counts like any other payment, in the month of the day you choose.</p>'
                   f'<div class="card">{cash_form(conn, ctx, ctx.today)}</div><div class="card" style="margin-top:14px"><h2>Added by hand</h2>{table}</div>')
 

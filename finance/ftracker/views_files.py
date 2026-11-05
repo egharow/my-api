@@ -41,6 +41,6 @@ def files_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     table = ('<div class="card" style="overflow-x:auto"><table><thead><tr><th>Account</th><th>Dates</th><th class="n">Payments</th><th class="n">Total</th>'
              '<th>Paid from your bank</th><th>Counted in</th><th>File</th></tr></thead><tbody>' + "".join(body) + "</tbody></table></div>") if body else \
             '<div class="card"><p>No statement files yet.</p></div>'
-    return layout(conn, ctx, "/upload", "Where every file went",
+    return layout(conn, ctx, "/files", "Where every file went",
                   '<h1>Where every file went</h1><p class="muted">Each statement you added: the account it belongs to, its dates, how many payments it holds, '
                   'whether its total matches what the card company states, the bank payment that settled it, and the months its payments count in.</p>' + table)

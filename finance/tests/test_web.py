@@ -904,3 +904,12 @@ def test_a_name_above_its_amount_is_read_and_a_heading_equal_to_the_sum_is_a_tot
         assert not by[v]["total"] and name in by[v]["label"]
     assert not by[27547.50]["total"]                                       # the bank balance at the top is a line of its own
     assert screens.find_date(GEMEL) == "2026-10-30"
+
+
+def test_a_goal_with_a_bad_number_says_what_to_fix(app):
+    res = post(app, "/goals", {"name": "House", "amount": "", "currency": "ILS"})
+    assert res.status == 303 and "Type+the+target+amount" in dict(res.headers)["Set-Cookie"] or "Type%20the%20target%20amount" in dict(res.headers)["Set-Cookie"]
+    res = post(app, "/goals", {"name": "House", "amount": "1,000,000", "age": "forty", "currency": "ILS"})
+    assert "must%20be%20a%20number" in dict(res.headers)["Set-Cookie"] or "must+be+a+number" in dict(res.headers)["Set-Cookie"]
+    ok = post(app, "/goals", {"name": "House", "amount": "1,000,000", "currency": "ILS"})
+    assert "Goal%20added" in dict(ok.headers)["Set-Cookie"] or "Goal+added" in dict(ok.headers)["Set-Cookie"]

@@ -148,4 +148,4 @@ def simulator_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
 <th class="n">Total</th><th class="n">After tax</th><th class="n">After tax, today's money</th></tr></thead><tbody id="rows"></tbody></table></div></details>
 </section></div>
 <script>{SIM_JS}</script>"""
-    return layout(conn, ctx, "/wealth", "Simulator", body)
+    return layout(conn, ctx, "/simulator", "Simulator", body)

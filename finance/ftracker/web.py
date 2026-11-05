@@ -840,9 +840,20 @@ class App:
                 accounts_mod.add_account(conn, form["kind"], "manual", form["label"].strip(), form.get("owner") or None, form.get("currency", "ILS"))
                 return self._redirect("/balances", "Account added")
             if path == "/goals":
-                goals.add_goal(conn, form["name"].strip(), float(form["amount"].replace(",", "")), form.get("currency", "ILS"),
-                               form.get("by") or None, int(form["age"]) if form.get("age") else None, form.get("owner") or None,
-                               [int(a) for a in multi.get("account", [])], float(form.get("return") or 0) / 100)
+                def number(key, label, whole=False):
+                    raw = (form.get(key) or "").replace(",", "").strip()
+                    if not raw:
+                        return None
+                    try:
+                        return int(raw) if whole else float(raw)
+                    except ValueError:
+                        raise ValueError(f"{label} must be a number, for example {'45' if whole else '500000'}.")
+                amount = number("amount", "The target amount")
+                if amount is None:
+                    raise ValueError("Type the target amount.")
+                goals.add_goal(conn, form["name"].strip(), amount, form.get("currency", "ILS"),
+                               form.get("by") or None, number("age", "The age", True), form.get("owner") or None,
+                               [int(a) for a in multi.get("account", [])], (number("return", "The yearly return") or 0.0) / 100)
                 return self._redirect("/wealth" if form.get("back") == "/wealth" else "/goals", "Goal added")
             if path == "/goals/remove":
                 conn.execute("UPDATE goals SET active = 0 WHERE id = ?", (int(form.get("id", 0)),))

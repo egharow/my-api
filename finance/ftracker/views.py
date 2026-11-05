@@ -453,12 +453,15 @@ def _badges(conn, ctx: Ctx, c: dict) -> dict:
         out["/alerts"] = str(n) if n else ""
         nxt = closing.to_close(conn, ctx.today)
         if nxt:
-            out["/close"] = f"{MONTH_ABBR[int(nxt[5:7]) - 1]} open"
+            out["/close"] = MONTH_ABBR[int(nxt[5:7]) - 1]
     except Exception:
         pass
     return out
 
 
+# pages that belong under another sidebar item
+PAGE_HOME = {"/spending": "/", "/trends": "/", "/dashboard": "/", "/imports": "/files", "/history": "/files", "/leftout": "/transactions",
+             "/screens": "/balances", "/items": "/alerts", "/networth": "/wealth"}
 MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 PHONE_ALLOWED = {"/", "/wealth"}
 
@@ -466,9 +469,7 @@ PHONE_ALLOWED = {"/", "/wealth"}
 def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
     c = counts(conn)
     badges = _badges(conn, ctx, c)
-    here = "/" if path in ("/", "/spending", "/trends", "/dashboard") else path
-    if path in ("/imports", "/history"):
-        here = "/files"
+    here = PAGE_HOME.get(path, path)
 
     def side_link(href: str, name: str) -> str:
         b = badges.get(href, "")
