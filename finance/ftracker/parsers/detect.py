@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from . import amex, cal, isracard, isracard_pdf, leumi_pdf, onezero
+from . import amex, cal, isracard, isracard_pdf, leumi_pdf, leumi_xls, onezero
 from .base import ParseError, ParsedFile
 
 
 # Bump this when a reader is added or improved, so files that could not be read before are tried again.
-PARSERS_VERSION = "3"
+PARSERS_VERSION = "4"
 
 
 class Unrecognised(Exception):
@@ -24,6 +24,11 @@ def parse_file(path: Path) -> ParsedFile:
                 return cal.parse_rows(rows)
             raise Unrecognised("Excel file is not a known card statement layout")
         if ext == ".xls":
+            if leumi_xls.is_html(path):                       # the bank's "Excel" download is an HTML table with an .xls name
+                rows = leumi_xls.read_rows(path)
+                if leumi_xls.looks_like(rows):
+                    return leumi_xls.parse_rows(rows)
+                raise Unrecognised("HTML table is not a known bank movements layout")
             rows = amex.read_rows(path)
             if amex.looks_like(rows):
                 return amex.parse_rows(rows)
