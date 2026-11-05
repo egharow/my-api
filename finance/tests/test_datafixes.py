@@ -225,3 +225,24 @@ def test_new_funds_copy_the_type_and_owner_of_a_similar_account(conn, home, tmp_
     latest = {r["label"]: r["amount"] for r in conn.execute(
         "SELECT a.label, b.amount FROM balances b JOIN accounts a ON a.id = b.account_id WHERE b.as_of >= '2026-10-30'")}
     assert latest == {"קרן מחר 45398021": 22705.48, "קרן מחר 45398023": 20989.39, "קרן השתלמות אינפינטי": 3616.0}
+
+
+def test_investment_categories_are_folded_into_one(conn, home, tmp_path):
+    from ftracker import categorize
+    conn.execute("INSERT INTO categories (name, parent_id, kind, neutral) VALUES ('Investments', NULL, 'expense', 0)")
+    conn.commit()
+    inv = conn.execute("SELECT id FROM categories WHERE name = 'Investments'").fetchone()[0]
+    cp = conn.execute("INSERT INTO batches (created_at, status) VALUES ('x', 'committed')").lastrowid
+    acct = accounts.add_account(conn, "bank", "manual", "Leumi 1")
+    aid = conn.execute("SELECT id FROM accounts WHERE label = 'Leumi 1'").fetchone()[0]
+    conn.execute("""INSERT INTO transactions (batch_id, account_id, dedupe_key, txn_date, budget_month, description, description_norm, amount, currency,
+                    category_id, category_status, kind, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                 (cp, aid, "k1", "2026-09-01", "2026-09", "x", "X", -100.0, "ILS", inv, "approved", "purchase", "x"))
+    conn.commit()
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([{"id": "s1", "action": "merge_categories", "into": "Transfer to savings",
+                                                      "from_any": ["Investments", "השקעות", "Investment"]}], ensure_ascii=False), encoding="utf-8")
+    lines = datafixes.apply(conn, home, app, date(2026, 11, 5))
+    assert lines[0].startswith("merged into Transfer to savings: Investments (1 lines)"), lines
+    assert conn.execute("SELECT COUNT(*) FROM categories WHERE name = 'Investments'").fetchone()[0] == 0
+    assert conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.dedupe_key = 'k1'").fetchone()[0] == "Transfer to savings"

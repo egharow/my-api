@@ -53,6 +53,26 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
         conn.execute("INSERT INTO categories (name, parent_id, kind, neutral) VALUES (?, NULL, ?, 0)", (e["name"], e.get("kind", "expense")))
         conn.commit()
         return f"category {e['name']} added"
+    if action == "merge_categories":
+        # Fold same-meaning categories into one, whatever state their lines are in (a data fix is trusted, after a backup).
+        dst = conn.execute("SELECT id FROM categories WHERE name = ?", (e["into"],)).fetchone()
+        if not dst:
+            return f"skipped: no category called {e['into']}"
+        from .seed import CATEGORIES
+        builtin = {c[0] for c in CATEGORIES}
+        done = []
+        for name in e["from_any"]:
+            src = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+            if not src or src["id"] == dst["id"]:
+                continue
+            lines = conn.execute("UPDATE transactions SET category_id = ? WHERE category_id = ?", (dst["id"], src["id"])).rowcount
+            conn.execute("UPDATE rules SET category_id = ? WHERE category_id = ?", (dst["id"], src["id"]))
+            if name not in builtin:
+                conn.execute("UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (src["id"],))
+                conn.execute("DELETE FROM categories WHERE id = ?", (src["id"],))
+            done.append(f"{name} ({lines} lines)")
+        conn.commit()
+        return ("merged into " + e["into"] + ": " + ", ".join(done)) if done else f"nothing to merge into {e['into']}"
     if action == "delete_rule":
         from .normalize import norm_description
         n = conn.execute("DELETE FROM rules WHERE source = 'user' AND pattern = ?", (norm_description(e["pattern"]),)).rowcount
