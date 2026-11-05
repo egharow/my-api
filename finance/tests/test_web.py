@@ -835,3 +835,18 @@ def test_a_line_counted_in_another_month_says_so(app, conn):
     conn.commit()
     assert "counted in October 2026" in text(get(app, "/transactions?m=all"))
     assert "counts in October 2026" in text(get(app, "/?find=ONE+OFF"))
+
+
+def test_an_instalment_without_a_marker_counts_in_the_month_it_is_billed(home, conn, monkeypatch):
+    from ftracker import booking
+    booking.set_basis(conn, "purchase")
+    conn.commit()
+    same = lambda: [card_txn(date(2026, 8, 23), "ישיר - בטוח חובה", 173.18, "ins1")]
+    run_import(home, conn, monkeypatch, [("sep.xlsx", card_file(last4="6097", billing=date(2026, 9, 2), txns=same())),
+                                         ("oct.xlsx", card_file(last4="6097", billing=date(2026, 10, 2), txns=same()))])
+    months = sorted(r[0] for r in conn.execute("SELECT budget_month FROM transactions WHERE description LIKE '%בטוח חובה%'"))
+    assert months == ["2026-09", "2026-10"]                       # not 2026-08 twice
+    # a single purchase with no repeat still counts where it was made
+    run_import(home, conn, monkeypatch, [("nov.xlsx", card_file(last4="6097", billing=date(2026, 11, 2),
+                                                                txns=[card_txn(date(2026, 10, 20), "CAFE ONCE", 40.0, "c1")]))])
+    assert conn.execute("SELECT budget_month FROM transactions WHERE description = 'CAFE ONCE'").fetchone()[0] == "2026-10"

@@ -33,3 +33,22 @@ def set_basis(conn: sqlite3.Connection, chosen: str) -> int:
     n = conn.execute(sql).rowcount
     conn.commit()
     return n
+
+
+def repair_continued_charges(conn: sqlite3.Connection) -> int:
+    """A payment in instalments shows the same purchase date on every statement. When a card line has the same date, merchant
+    and amount as a line on another statement of the same card, it is one more instalment of that purchase, so it counts in
+    the month it is billed (as marked instalments already do), not in the month of the original purchase. Returns lines moved."""
+    if basis(conn) != "purchase":
+        return 0
+    n = conn.execute(
+        """UPDATE transactions SET budget_month = substr(billing_date, 1, 7)
+           WHERE account_id IN (SELECT id FROM accounts WHERE kind = 'card') AND billing_date IS NOT NULL
+             AND statement_id IS NOT NULL AND COALESCE(instalment_total, 0) <= 1
+             AND budget_month != substr(billing_date, 1, 7)
+             AND EXISTS (SELECT 1 FROM transactions o WHERE o.account_id = transactions.account_id AND o.txn_date = transactions.txn_date
+                         AND o.description_norm = transactions.description_norm AND o.amount = transactions.amount
+                         AND o.statement_id IS NOT NULL AND o.statement_id != transactions.statement_id)""").rowcount
+    if n:
+        conn.commit()
+    return n

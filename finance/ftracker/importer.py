@@ -293,4 +293,8 @@ def import_inbox(home: Home, conn: sqlite3.Connection, today: date | None = None
     if report.imported:
         from . import cloudbackup
         cloudbackup.after_import(conn, home)          # keep the originals and the database in your backup folder too
+    try:
+        booking.repair_continued_charges(conn)
+    except sqlite3.Error:
+        pass
     return report

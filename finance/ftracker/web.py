@@ -896,6 +896,10 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
     conn = connect(home.db_path)
     try:
         need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn) or bool(datafixes.pending(conn, appmode.app_dir()))
+        try:
+            booking.repair_continued_charges(conn)           # instalments without a marker count in the month they are billed
+        except sqlite3.Error:
+            pass
         phone_on = conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone()
         phone_pin = (conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone() or [None])[0] if phone_on else None
     finally:
