@@ -337,6 +337,7 @@ a{color:var(--accent)}
 .tfilter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}.tfilter input[type=search]{flex:1 1 260px;min-width:0;height:40px}.tfilter select,.tfilter button{height:40px}
 .tsum{display:flex;flex-wrap:wrap;gap:8px 32px;padding:12px 20px;background:var(--surface);border-top:2px solid var(--rule);font-size:14px;color:var(--ink2)}
 .tsum .good,.tbl .good{color:var(--goodtext)}.tkey{display:flex;gap:16px;margin-left:auto;font-size:13px}.tkey span{display:flex;align-items:center;gap:6px}
+.btnlink.strong{background:var(--ink);color:var(--surface);border-color:var(--ink);height:40px;display:inline-flex;align-items:center;padding:0 16px;font-weight:600}
 .mk{display:inline-block;width:8px;height:8px;box-sizing:border-box}.mk.ok{background:var(--ink)}.mk.guess{border:1px dashed var(--muted)}
 .tbl{background:var(--surface);margin-top:12px;overflow-x:auto}
 .thead,.trow>summary{display:grid;grid-template-columns:16px minmax(0,1.6fr) minmax(0,1fr) 150px 130px;gap:16px;align-items:center;padding:0 20px;min-width:760px}

@@ -209,7 +209,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     months = d["months"]
     if not months:
         return layout(conn, ctx, "/", "Overview", f'<h1>Overview</h1>{notice}<div class="card"><p>No spending or income yet. '
-                      'Drop your statements on the <a href="/upload">Upload</a> page.</p></div>' + _tasks(conn, ctx))
+                      'Drop your statements below, or open <a href="/upload">Add statements</a>.</p></div>' + ("" if ctx.readonly else _import_box(ctx)) + _tasks(conn, ctx))
     this_month = ctx.today[:7]
     complete = [m for m in months if m < this_month]
     latest = (complete or months)[-1]
@@ -240,11 +240,21 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     else:
         win = months_between(frm, to) if mode == "custom" else [x for x in months if x <= end][-int(mode):]
         body = _period_view(conn, ctx, d, win, owner, base, mode, q)
-    head = f'<div class="pagehead"><h1>Overview</h1></div>{notice}{controls}'
+    importer_ui = "" if ctx.readonly else _import_box(ctx)
+    head = f'<div class="pagehead"><h1>Overview</h1>{"" if ctx.readonly else IMPORT_BUTTON}</div>{notice}{controls}{importer_ui}'
     if mode != "month":
         return layout(conn, ctx, "/", "Overview", f"{head}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
     side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
     return layout(conn, ctx, "/", "Overview", f'{head}{_dataline(conn, ctx.today)}<div class="ov"><div class="ovmain">{body}</div><aside class="ovside">{side}</aside></div>')
+
+
+IMPORT_BUTTON = '<a class="btnlink strong" href="/upload">Import statements</a>'
+
+
+def _import_box(ctx) -> str:
+    """Drop files right here on the home page. They are read the same way as on the Add statements page."""
+    from .views_setup import dropzone
+    return dropzone(ctx, compact=True)
 
 
 def _statements_card(conn, ctx, m: str) -> str:

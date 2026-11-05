@@ -913,3 +913,11 @@ def test_a_goal_with_a_bad_number_says_what_to_fix(app):
     assert "must%20be%20a%20number" in dict(res.headers)["Set-Cookie"] or "must+be+a+number" in dict(res.headers)["Set-Cookie"]
     ok = post(app, "/goals", {"name": "House", "amount": "1,000,000", "currency": "ILS"})
     assert "Goal%20added" in dict(ok.headers)["Set-Cookie"] or "Goal+added" in dict(ok.headers)["Set-Cookie"]
+
+
+def test_the_home_page_can_take_statements(app):
+    t = text(get(app, "/"))
+    assert "Import statements" in t and 'id="drop"' in t and 'action="/import"' in t
+    phone = App(app.home, today="2026-10-05", phone_pin="123456")
+    ro = phone.handle("GET", "/", {**H, "x-client-ip": "10.0.0.9", "cookie": f"auth={phone._auth_token()}"})
+    assert ro.status == 200 and "Import statements" not in text(ro) and 'id="drop"' not in text(ro)      # the phone only looks
