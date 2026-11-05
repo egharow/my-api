@@ -71,7 +71,8 @@ def _vs(value: float, usual: float | None) -> str:
 
 def _cat_options(conn) -> str:
     return "".join(f"<option>{esc(r[0])}</option>" for r in conn.execute(
-        "SELECT name FROM categories WHERE name != 'Uncategorised' AND kind IN ('expense','fee','debt','income') ORDER BY kind, name"))
+        """SELECT name FROM categories WHERE name != 'Uncategorised'
+           ORDER BY CASE kind WHEN 'expense' THEN 0 WHEN 'fee' THEN 1 WHEN 'debt' THEN 2 WHEN 'income' THEN 3 WHEN 'saving' THEN 4 ELSE 5 END, name"""))
 
 
 def _change_form(ctx: Ctx, line_id, cats: str, back: str, month: str | None = None) -> str:

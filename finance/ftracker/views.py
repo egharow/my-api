@@ -885,7 +885,9 @@ def imports(conn: sqlite3.Connection, ctx: Ctx) -> str:
     return layout(conn, ctx, "/imports", "Imports", "".join(out))
 
 
-def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
+def balances_page(conn: sqlite3.Connection, ctx: Ctx, q: dict | None = None) -> str:
+    q = q or {}
+    only_todo = q.get("show") == "todo"
     due, last = balances.balances_due(conn, ctx.today)
     rows, folded_rows = [], []
     accts = conn.execute("""SELECT a.id, a.label, a.kind, a.currency, o.name AS owner FROM accounts a
@@ -895,14 +897,23 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     latest = {r["account_id"]: r for r in balances.latest(conn, ctx.today)}
     fold = balances.fold_count(conn)
     above = len(accts) if fold is None else min(fold, len(accts))
+    this_month = ctx.today[:7]
+    done_now = {a["id"] for a in accts if latest.get(a["id"]) and latest[a["id"]]["as_of"][:7] == this_month}
+    n_todo = len(accts) - len(done_now)
     for n, a in enumerate(accts):
         l = latest.get(a["id"])
         stale = l and l["as_of"] < _days_ago(ctx.today, balances.STALE_DAYS)
-        (rows if n < above else folded_rows).append(f'<tr><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td>'
+        if only_todo and a["id"] in done_now:
+            continue
+        (rows if (n < above or only_todo) else folded_rows).append(f'<tr><td dir="auto">{esc(a["label"])}</td><td>{esc(a["kind"])}</td><td>{esc(a["owner"] or "")}</td>'
                     f'<td class="n">{esc(money(l["amount"], l["currency"]) if l else "–")}</td>'
-                    f'<td>{esc(l["as_of"]) if l else ""}{" ▲ old" if stale else ""}</td>'
+                    f'<td>{esc(l["as_of"]) if l else ""}{" ▲ old" if stale else ""}{" ✔ this month" if a["id"] in done_now else ""}</td>'
                     f'<td><input name="bal_{a["id"]}" inputmode="decimal" size="12" placeholder="new value"> {esc(a["currency"])}</td>'
                     + (f'<td><label class="cap"><input type="checkbox" name="same_{a["id"]}" value="1"> same</label></td>' if l else "<td></td>") + '</tr>')
+    filt = ('<p class="seg"><a class="%s" href="/balances">All accounts (%d)</a> <a class="%s" href="/balances?show=todo">Not updated this month (%d)</a></p>'
+            % ("" if only_todo else "on", len(accts), "on" if only_todo else "", n_todo))
+    if only_todo and not n_todo:
+        filt += '<div class="card"><p>Every account has a balance from this month. ✔</p></div>'
     banner = (f'<div class="banner">Balances are due{" (last updated " + esc(last) + ")" if last else ""}.</div>' if due else "")
     kinds = "".join(f"<option>{k}</option>" for k in ("bank", "investment", "pension", "savings", "real_estate", "loan", "other"))
     owner_opts = '<option value="">(none)</option>' + "".join(f"<option>{esc(o)}</option>" for o in ctx.owners)
@@ -958,7 +969,7 @@ def balances_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                'The order is saved the moment you drop. Rename, close or delete an account under Edit. <span id="saved" class="chip good" style="border:0"></span></p>'
                f'<ul id="acc-list" class="acc" data-csrf="{esc(ctx.csrf)}">{"".join(items)}</ul></div><script>{arrange_js}</script>')
     return layout(conn, ctx, "/balances", "Balances",
-                  f'<h1>Balances</h1>{banner}{rate_box}<div class="card">{form}</div>{arrange}<div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
+                  f'<h1>Balances</h1>{banner}{filt}{rate_box}<div class="card">{form}</div>{arrange}<div class="card" style="margin-top:12px"><h2>New account</h2>{add}</div>')
 
 
 def _days_ago(today: str, days: int) -> str:

@@ -850,3 +850,26 @@ def test_an_instalment_without_a_marker_counts_in_the_month_it_is_billed(home, c
     run_import(home, conn, monkeypatch, [("nov.xlsx", card_file(last4="6097", billing=date(2026, 11, 2),
                                                                 txns=[card_txn(date(2026, 10, 20), "CAFE ONCE", 40.0, "c1")]))])
     assert conn.execute("SELECT budget_month FROM transactions WHERE description = 'CAFE ONCE'").fetchone()[0] == "2026-10"
+
+
+def test_the_change_category_menu_offers_savings_and_transfers_too(app, conn):
+    from ftracker import views_overview
+    conn.execute("INSERT OR IGNORE INTO categories (name, parent_id, kind, neutral) VALUES ('Transfer to savings', NULL, 'saving', 1)")
+    conn.commit()
+    opts = views_overview._cat_options(conn)
+    assert "Transfer to savings" in opts and "Uncategorised" not in opts
+    assert opts.index("Groceries") < opts.index("Transfer to savings") if "Groceries" in opts else True
+
+
+def test_balances_can_be_filtered_to_what_was_not_filled_in_this_month(app, conn):
+    accounts.add_account(conn, "savings", "x", "Rainy day")
+    accounts.add_account(conn, "savings", "x", "Pension fund")
+    balances.set_balance(conn, "Rainy day", 100, "2026-09-20")                 # an old value
+    balances.set_balance(conn, "Pension fund", 200, "2026-10-03")              # this month (today is 2026-10-05)
+    conn.commit()
+    all_ = text(get(app, "/balances"))
+    todo = text(get(app, "/balances?show=todo"))
+    assert "Not updated this month (" in all_ and "Rainy day" in all_ and "Pension fund" in all_
+    assert "bal_" in todo and "Rainy day" in todo.split("Arrange your accounts")[0]
+    assert "Pension fund" not in todo.split("Arrange your accounts")[0]          # the filled one is hidden from the form
+    assert "✔ this month" in all_

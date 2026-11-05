@@ -309,7 +309,7 @@ class App:
         if path == "/imports":
             return _html(200, views.imports(conn, ctx))
         if path == "/balances":
-            return _html(200, views.balances_page(conn, ctx))
+            return _html(200, views.balances_page(conn, ctx, q))
         if path == "/goals":
             return _html(200, views.goals_page(conn, ctx))
         if path == "/sheet":
