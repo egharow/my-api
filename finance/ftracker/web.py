@@ -832,7 +832,7 @@ class App:
                     return self._redirect(back, "Pick a payment.", err=True)
                 return self._redirect(back, "Left out of the totals" if form.get("on") == "1" else "Counted again")
             if path == "/fx/refresh":
-                res = fx.refresh_current(conn, self._today(), force=True)
+                res = fx.refresh_current(conn, self._today(), force=True, replace_typed=True)
                 if res["status"] == "failed":
                     return self._redirect("/balances", "Could not reach a rate source (offline?). Type today's rate instead.", err=True)
                 return self._redirect("/balances", f"Dollar rate: ₪{res['rate']:.3f} ({res['source']}, {res['date']})")

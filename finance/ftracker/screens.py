@@ -132,20 +132,53 @@ def extract(words: list[dict]) -> list[dict]:
             elif w["text"] not in _SYMBOL:
                 label.append(w["text"])
         rows.append({"money": money, "label": re.sub(r"\s+", " ", " ".join(label)).strip(), "y": min(w["y"] for w in r)})
-    out, section = [], ""
+    out, section, pending = [], "", []
     for i, r in enumerate(rows):
         if _COUNT.search(r["label"]) and i > 0:
             head = out[-1] if out and out[-1]["y"] == rows[i - 1]["y"] else None
             section = rows[i - 1]["label"]
             if head:
                 head["total"], head["section"] = True, ""
+            pending = []
             continue
         if not r["money"]:
+            if r["label"] and not any(k in r["label"] for k in _SKIP):       # a name above its number: "Kupat X", "account 123", then the amount
+                pending.append(r["label"])
             continue
-        skip = any(s in r["label"] for s in _SKIP)
+        label = r["label"] or " ".join(pending[-2:])
+        pending = []
+        skip = any(s in label for s in _SKIP)
         for value, cur in r["money"][:1]:
-            out.append({"amount": value, "currency": cur, "label": r["label"], "section": section, "total": skip or not r["label"], "y": r["y"]})
+            out.append({"amount": value, "currency": cur, "label": label, "section": section, "total": skip or not label, "y": r["y"]})
+    # a heading whose amount is the sum of the lines under it is a total, whatever it is called
+    for i, r in enumerate(out):
+        acc = 0.0
+        for j in range(i + 1, min(len(out), i + 13)):
+            if out[j]["currency"] != r["currency"]:
+                break
+            acc += out[j]["amount"]
+            if j > i + 1 and abs(acc - r["amount"]) < 0.015:
+                r["total"] = True
+                break
     return out
+
+
+_DATE = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})")
+
+
+def find_date(words: list[dict]) -> str | None:
+    """The date the screen says its numbers are for ("as of 30.10.26", "updated 02/11/26"), as YYYY-MM-DD."""
+    for r in _rows(words):
+        text = " ".join(w["text"] for w in sorted(r, key=lambda w: -w["x"]))
+        if not any(k in text for k in ("תאריך", "עדכון", "נכון", "מועד")):
+            continue
+        m = _DATE.search(text)
+        if m:
+            d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            y += 2000 if y < 100 else 0
+            if 1 <= d <= 31 and 1 <= mo <= 12 and 2000 <= y <= 2100:
+                return f"{y:04d}-{mo:02d}-{d:02d}"
+    return None
 
 
 def _norm(text: str) -> str:

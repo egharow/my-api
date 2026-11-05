@@ -132,3 +132,16 @@ def test_monthly_checklist_only_ticks_balances_updated_this_month(conn):
     balances.set_balance(conn, "Pension", 6, "2026-11-02")
     item = [i for g in expected.checklist(conn, "2026-11-03")["groups"] for i in g["items"] if i["label"] == "Balances (monthly)"][0]
     assert item["status"] == "done" and item["children"][0]["status"] == "done"
+
+
+def test_fetching_automatically_replaces_a_rate_you_typed_earlier(conn):
+    fx.set_rate(conn, "2026-10-05", "USD", "ILS", 3.13, "manual")           # typed once, and it kept winning over fresh rates
+    conn.commit()
+    assert fx.current_rate(conn)["rate"] == 3.13
+    res = fx.refresh_current(conn, "2026-10-05", FakeNet({"frankfurter": FRANKFURTER}), force=True, replace_typed=True)
+    assert res["status"] == "fetched" and fx.current_rate(conn)["rate"] == 3.612 and fx.current_rate(conn)["source"] == "web"
+    # a normal refresh does not undo a rate you type after that
+    fx.set_rate(conn, "2026-10-05", "USD", "ILS", 3.2, "manual")
+    conn.commit()
+    assert fx.refresh_current(conn, "2026-10-05", FakeNet({"frankfurter": FRANKFURTER}))["status"] == "fresh"
+    assert fx.current_rate(conn)["rate"] == 3.2

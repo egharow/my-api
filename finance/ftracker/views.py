@@ -541,7 +541,8 @@ def fx_note(conn, today: str) -> str:
         return "no dollar rate yet"
     age = (date.fromisoformat(today) - date.fromisoformat(cur["date"])).days
     stale = f" ▲ {age} days old" if age > 3 else ""
-    return f"₪{cur['rate']:.3f} per $ · {cur['source']} · {cur['date']}{stale}"
+    typed = " · typed by you, press “Fetch the current rate automatically” to replace it" if cur["source"] == "manual" else ""
+    return f"₪{cur['rate']:.3f} per $ · {cur['source']} · {cur['date']}{stale}{typed}"
 
 
 def dashboard(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:

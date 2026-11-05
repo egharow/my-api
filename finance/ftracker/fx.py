@@ -123,8 +123,8 @@ def parse_web_rate(text: str) -> tuple[str, float]:
     raise ValueError("unexpected rate response")
 
 
-def refresh_current(conn: sqlite3.Connection, today: str, opener=urllib.request.urlopen, force: bool = False) -> dict:
-    """Fetch today's USD/ILS rate if the one we hold is stale. Never raises: offline is fine."""
+def refresh_current(conn: sqlite3.Connection, today: str, opener=urllib.request.urlopen, force: bool = False, replace_typed: bool = False) -> dict:
+    """Fetch today's USD/ILS rate if the one we hold is stale. With replace_typed, a rate you typed yourself is dropped for the fresh one. Never raises: offline is fine."""
     have = current_rate(conn)
     if not force and have and have["date"] >= (date.fromisoformat(today) - timedelta(days=MAX_AGE_DAYS)).isoformat():
         return {"status": "fresh", **have}
@@ -132,6 +132,9 @@ def refresh_current(conn: sqlite3.Connection, today: str, opener=urllib.request.
     for url, name in WEB_SOURCES:
         try:
             day, rate = parse_web_rate(_get(url, opener))
+            if replace_typed:              # "Fetch automatically" means: forget a rate I typed myself today or earlier and use the fresh one
+                conn.execute("DELETE FROM fx_rates WHERE base = 'USD' AND quote = 'ILS' AND source = 'manual' AND rate_date >= ?",
+                             ((date.fromisoformat(today) - timedelta(days=30)).isoformat(),))
             set_rate(conn, min(day, today), "USD", "ILS", rate, "web")
             conn.commit()
             return {"status": "fetched", "rate": rate, "date": min(day, today), "source": name}

@@ -873,3 +873,34 @@ def test_balances_can_be_filtered_to_what_was_not_filled_in_this_month(app, conn
     assert "bal_" in todo and "Rainy day" in todo.split("Arrange your accounts")[0]
     assert "Pension fund" not in todo.split("Arrange your accounts")[0]          # the filled one is hidden from the form
     assert "✔ this month" in all_
+
+
+GEMEL = _words([
+    (150, [("אליקים", 400), ("גבריאל", 340), ("הרו", 300)]),
+    (230, [("₪27,547.50", 40)]),
+    (350, [("קופות", 400), ("גמל/קרנות", 340), ("השתלמות", 280)]),
+    (415, [("₪130,209.72", 40)]),
+    (470, [("נכון", 400), ("לתאריך", 360), ("30.10.26", 300)]),
+    (580, [("כלל", 400), ("השתלמות", 340)]),
+    (628, [("10296907", 400)]),
+    (693, [("₪86,514.85", 40)]),
+    (748, [("קרן", 400), ("השתלמות", 340)]),
+    (940, [("קרן", 400), ("השתלמות", 340), ("לאקדמאים", 280)]),
+    (990, [("45398021", 400)]),
+    (1055, [("₪22,705.48", 40)]),
+    (1105, [("קרן", 400), ("השתלמות", 340)]),
+    (1300, [("קרן", 400), ("השתלמות", 340), ("לאקדמאים", 280)]),
+    (1350, [("45398023", 400)]),
+    (1415, [("₪20,989.39", 40)]),
+])
+
+
+def test_a_name_above_its_amount_is_read_and_a_heading_equal_to_the_sum_is_a_total():
+    from ftracker import screens
+    got = screens.extract(GEMEL)
+    by = {r["amount"]: r for r in got}
+    assert by[130209.72]["total"] is True                                   # the section heading is the sum of the three funds
+    for v, name in ((86514.85, "כלל השתלמות"), (22705.48, "45398021"), (20989.39, "45398023")):
+        assert not by[v]["total"] and name in by[v]["label"]
+    assert not by[27547.50]["total"]                                       # the bank balance at the top is a line of its own
+    assert screens.find_date(GEMEL) == "2026-10-30"

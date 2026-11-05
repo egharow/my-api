@@ -40,6 +40,9 @@ def review_page(conn: sqlite3.Connection, ctx: Ctx, home: Home, name: str) -> st
         return layout(conn, ctx, "/screens", "Screenshot", '<h1>Not found</h1><p><a href="/screens">Back</a></p>')
     words, note = ocr.read_words(path)
     found = screens.extract(words) if words else []
+    seen_on = screens.find_date(words) if words else None
+    if seen_on and seen_on > ctx.today:
+        seen_on = None
     accts = _accounts(conn, ctx.today)
     opts = "".join(f'<option value="{a["id"]}">{esc(a["label"])}{" · " + esc(a["owner"]) if a["owner"] else ""} ({esc(a["currency"])})</option>' for a in accts)
 
@@ -65,7 +68,8 @@ def review_page(conn: sqlite3.Connection, ctx: Ctx, home: Home, name: str) -> st
         for a in accts)
     form = _form(ctx, "/screens/approve",
                  f'<input type="hidden" name="image" value="{esc(safe)}"><input type="hidden" name="n" value="{len(found)}">'
-                 f'<p><label>Date of these balances <input type="date" name="as_of" value="{esc(ctx.today)}"></label></p>{read}'
+                 f'<p><label>Date of these balances <input type="date" name="as_of" value="{esc(seen_on or ctx.today)}"></label>'
+                 f'{" <span class=cap>read from the picture</span>" if seen_on else ""}</p>{read}'
                  f'<details style="margin-top:12px"{"" if rows else " open"}><summary><b>Type balances yourself</b> <span class="cap">for accounts that were not read</span></summary>'
                  f'<table><thead><tr><th>Account</th><th class="n">Last value</th><th>New value</th></tr></thead><tbody>{manual}</tbody></table></details>'
                  '<p class="row" style="margin-top:12px"><button>Approve and save the ticked balances</button> '
