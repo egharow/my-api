@@ -502,6 +502,10 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
             last = None
         if last:
             backup = f'<div class="bk">{esc(last)}</div>'
+    where = ""
+    if not ctx.readonly:
+        from . import appmode
+        where = f" · running from {esc(str(appmode.app_dir()))}"          # shows which copy of the app is open, when you have more than one
     side = ('<aside class="side" aria-label="Main"><div class="brand"><span class="mark" aria-hidden="true">₪</span><b>Household ledger</b></div>'
             + "".join(groups) + f'<div class="sidefoot">{theme}{backup}{quit_form}</div></aside>')
     tabs_src = [t for t in PHONE_TABS if not ctx.readonly or t[0] in PHONE_ALLOWED]
@@ -511,7 +515,7 @@ def layout(conn, ctx: Ctx, path: str, title: str, body: str) -> str:
         + f'</span><span>{n}</span></a>' for h, n in tabs_src)
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
             f"<title>{esc(title)} · Finance</title><style>{CSS}</style><script>{THEME_JS}</script></head><body>"
-            f"<div class=\"shell\">{side}<div class=\"content\"><main>{flash}{body}</main><p class=\"foot\">Version {esc(BUILD)}</p></div></div>"
+            f"<div class=\"shell\">{side}<div class=\"content\"><main>{flash}{body}</main><p class=\"foot\">Version {esc(BUILD)}{where}</p></div></div>"
             f"<div class=\"tabs\" role=\"navigation\" aria-label=\"Main\">{tabs}</div><div id=\"tip\"></div><script>{JS}{HEARTBEAT}</script></body></html>")
 
 
