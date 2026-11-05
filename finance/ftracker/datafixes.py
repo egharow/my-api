@@ -71,6 +71,7 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
                 conn.execute("UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (src["id"],))
                 conn.execute("DELETE FROM categories WHERE id = ?", (src["id"],))
             done.append(f"{name} ({lines} lines)")
+        categorize.sync_kinds(conn, dst["id"])               # the moved lines become transfers, so pairing and destinations treat them as such
         conn.commit()
         return ("merged into " + e["into"] + ": " + ", ".join(done)) if done else f"nothing to merge into {e['into']}"
     if action == "delete_rule":

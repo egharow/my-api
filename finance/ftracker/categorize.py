@@ -188,6 +188,9 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
             category_id, confidence, basis = mapped["id"], 0.5, f"the card company calls it “{sector}”"
     if t["amount"] > 0 and kind == "purchase":
         kind = "refund"
+    ck = conn.execute("SELECT kind FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if ck and ck["kind"] in ("transfer", "saving") and kind in ("purchase", "refund", "other"):
+        kind = "transfer"                  # a line in a transfer or savings category is a move of money, so it is paired and tracked as one
 
     conn.execute(
         """UPDATE transactions SET category_id = ?, category_status = ?, confidence = ?,
@@ -241,6 +244,8 @@ def approve(conn: sqlite3.Connection, txn_ids: list[int], category_name: str,
         audit(conn, "approve_category", "transaction", tid, category_name, actor)
         if cat_kind in ("expense", "fee", "debt"):             # a payment moved out of a transfer category is an ordinary payment
             conn.execute("UPDATE transactions SET kind = 'purchase' WHERE id = ? AND kind = 'transfer'", (tid,))
+        elif cat_kind in ("transfer", "saving"):               # and one moved into a transfer or savings category is a move of money
+            conn.execute("UPDATE transactions SET kind = 'transfer' WHERE id = ? AND kind IN ('purchase', 'refund', 'other')", (tid,))
     if learn and txn_ids:
         desc = conn.execute("SELECT description_norm FROM transactions WHERE id = ?",
                             (txn_ids[0],)).fetchone()[0]
@@ -370,6 +375,7 @@ def merge_category(conn: sqlite3.Connection, src: str, dst: str) -> dict:
         raise PermissionError(f"{locked} line(s) of “{src}” are in a submitted import; reopen it first")
     moved = conn.execute("UPDATE transactions SET category_id = ? WHERE category_id = ?", (b["id"], a["id"])).rowcount
     rules = conn.execute("UPDATE rules SET category_id = ? WHERE category_id = ?", (b["id"], a["id"])).rowcount
+    sync_kinds(conn, b["id"])
     removed = False
     if src not in {c[0] for c in CATEGORIES}:
         conn.execute("UPDATE categories SET parent_id = NULL WHERE parent_id = ?", (a["id"],))
@@ -429,4 +435,33 @@ def set_treatment(conn: sqlite3.Connection, category_id: int, treatment: str) ->
     if (kind, neutral) == (row["kind"], row["neutral"]):
         return False
     conn.execute("UPDATE categories SET kind = ?, neutral = ? WHERE id = ?", (kind, neutral, category_id))
+    sync_kinds(conn, category_id)
     return True
+
+
+def sync_kinds(conn: sqlite3.Connection, category_id: int) -> int:
+    """Make every line's kind agree with its category: lines in a transfer or savings category are transfers, and lines in a
+    spending category that were transfers are ordinary payments. Used after a category is merged or its meaning is changed."""
+    row = conn.execute("SELECT kind FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if not row:
+        return 0
+    if row["kind"] in ("transfer", "saving"):
+        n = conn.execute("UPDATE transactions SET kind = 'transfer' WHERE category_id = ? AND kind IN ('purchase', 'refund', 'other')", (category_id,)).rowcount
+    elif row["kind"] in ("expense", "fee", "debt"):
+        n = conn.execute("UPDATE transactions SET kind = CASE WHEN amount > 0 THEN 'refund' ELSE 'purchase' END WHERE category_id = ? AND kind = 'transfer'", (category_id,)).rowcount
+    else:
+        n = 0
+    return n
+
+
+def repair_transfer_kinds(conn: sqlite3.Connection) -> int:
+    """Lines you filed under a transfer or savings category earlier, by hand, become transfers now, and are paired with the other side."""
+    n = 0
+    for r in conn.execute("SELECT id FROM categories WHERE kind IN ('transfer', 'saving')").fetchall():
+        n += sync_kinds(conn, r["id"])
+    if n:
+        from . import reconcile
+        reconcile.pair_transfers(conn)
+        reconcile.resolve_stale(conn)
+    conn.commit()
+    return n

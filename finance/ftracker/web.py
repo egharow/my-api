@@ -916,6 +916,7 @@ def _serve(home: Home, port: int, lan: bool, pin: str | None, open_browser: bool
         need_load = firstrun.needed(conn, appmode.app_dir()) or not firstrun.repair_done(conn) or bool(datafixes.pending(conn, appmode.app_dir()))
         try:
             booking.repair_continued_charges(conn)           # instalments without a marker count in the month they are billed
+            categorize.repair_transfer_kinds(conn)           # lines you filed under savings or transfers are treated as transfers
         except sqlite3.Error:
             pass
         phone_on = conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone()

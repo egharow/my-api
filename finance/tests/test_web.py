@@ -952,3 +952,34 @@ def test_a_whole_category_can_be_left_out_of_the_totals_and_turned_into_savings(
     unc = conn.execute("SELECT id FROM categories WHERE name = 'Uncategorised'").fetchone()[0]
     assert categorize.set_treatment(conn, unc, "left_out") is False                      # Uncategorised is never left out by accident
     assert before is not None
+
+
+def test_lines_in_a_savings_or_transfer_category_are_always_treated_as_transfers(home, conn, monkeypatch):
+    from ftracker import categorize, accounts
+    run_import(home, conn, monkeypatch, [("b.pdf", bank_file([(date(2026, 9, 5), "SOMETHING ODD", -700.0), (date(2026, 9, 6), "ANOTHER ODD", -50.0)]))])
+    ids = {r["description"]: r["id"] for r in conn.execute("SELECT id, description FROM transactions")}
+    categorize.approve(conn, [ids["SOMETHING ODD"]], "Transfer to savings")
+    assert conn.execute("SELECT kind FROM transactions WHERE id = ?", (ids["SOMETHING ODD"],)).fetchone()[0] == "transfer"
+    categorize.approve(conn, [ids["SOMETHING ODD"]], "Groceries")                          # moved back out: an ordinary payment again
+    assert conn.execute("SELECT kind FROM transactions WHERE id = ?", (ids["SOMETHING ODD"],)).fetchone()[0] == "purchase"
+    # a rule with no explicit kind that points at a savings category still makes transfers
+    categorize.add_user_rule(conn, "ANOTHER ODD", "Transfer to savings", None, None)
+    categorize.classify(conn, ids["ANOTHER ODD"])
+    assert conn.execute("SELECT kind FROM transactions WHERE id = ?", (ids["ANOTHER ODD"],)).fetchone()[0] == "transfer"
+    # changing a whole category to savings turns its lines into transfers too
+    gid = conn.execute("SELECT id FROM categories WHERE name = 'Groceries'").fetchone()[0]
+    categorize.approve(conn, [ids["SOMETHING ODD"]], "Groceries")
+    categorize.set_treatment(conn, gid, "saving")
+    assert conn.execute("SELECT kind FROM transactions WHERE id = ?", (ids["SOMETHING ODD"],)).fetchone()[0] == "transfer"
+
+
+def test_old_hand_filed_savings_lines_are_repaired_and_paired(home, conn, monkeypatch):
+    from ftracker import categorize
+    run_import(home, conn, monkeypatch, [("b.pdf", bank_file([(date(2026, 9, 5), "SOMETHING ODD", -700.0)]))])
+    tid = conn.execute("SELECT id FROM transactions WHERE description = 'SOMETHING ODD'").fetchone()[0]
+    cat = conn.execute("SELECT id FROM categories WHERE name = 'Transfer to savings'").fetchone()[0]
+    conn.execute("UPDATE transactions SET category_id = ?, kind = 'purchase' WHERE id = ?", (cat, tid))       # how an older version left it
+    conn.commit()
+    assert categorize.repair_transfer_kinds(conn) == 1
+    assert conn.execute("SELECT kind FROM transactions WHERE id = ?", (tid,)).fetchone()[0] == "transfer"
+    assert categorize.repair_transfer_kinds(conn) == 0                                                       # nothing more to do
