@@ -112,7 +112,14 @@ def _run(conn: sqlite3.Connection, e: dict, today: date) -> str:
     if action == "add_account":
         if _account(conn, e["label"]):
             return f"account {e['label']} already exists"
-        accounts.add_account(conn, e["kind"], "manual", e["label"], e.get("owner"), e.get("currency", "ILS"))
+        kind, owner, currency = e.get("kind"), e.get("owner"), e.get("currency", "ILS")
+        if e.get("like"):                                       # same type, owner and currency as an account you already have
+            twin = conn.execute("SELECT a.kind, a.currency, o.name AS owner FROM accounts a LEFT JOIN owners o ON o.id = a.owner_id "
+                                "WHERE a.label = ? ORDER BY a.active DESC, a.id LIMIT 1", (e["like"],)).fetchone()
+            if twin:
+                kind, currency = kind or twin["kind"], e.get("currency") or twin["currency"]
+                owner = owner or twin["owner"]
+        accounts.add_account(conn, kind or "savings", "manual", e["label"], owner, currency)
         return f"account {e['label']} added"
     if action == "set_owner":
         acct = _account(conn, e["label"])

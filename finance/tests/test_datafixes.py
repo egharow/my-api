@@ -201,3 +201,27 @@ def test_accounts_can_be_added_reowned_reopened_and_given_a_balance(conn, home, 
     row = conn.execute("SELECT a.active, o.name FROM accounts a JOIN owners o ON o.id = a.owner_id WHERE a.label = 'לאומי'").fetchone()
     assert tuple(row) == (1, "Shir")
     assert conn.execute("SELECT amount FROM balances b JOIN accounts a ON a.id = b.account_id WHERE a.label = 'Fund'").fetchone()[0] == 1234.5
+
+
+def test_new_funds_copy_the_type_and_owner_of_a_similar_account(conn, home, tmp_path):
+    accounts.add_owner(conn, "Ely")
+    accounts.add_account(conn, "pension", "manual", "מחר", "Ely")
+    accounts.add_account(conn, "pension", "manual", "כלל השתלמות", "Ely")
+    balances.set_balance(conn, "מחר", 43000.0, "2026-10-09")
+    app = tmp_path / "app"; app.mkdir()
+    (app / "data_fixes.json").write_text(json.dumps([
+        {"id": "m1", "action": "rename_account", "label": "מחר", "to": "קרן מחר 45398021"},
+        {"id": "m2", "action": "add_account", "label": "קרן מחר 45398023", "like": "קרן מחר 45398021"},
+        {"id": "m3", "action": "add_account", "label": "קרן השתלמות אינפינטי", "like": "כלל השתלמות"},
+        {"id": "m4", "action": "set_balance", "label": "קרן מחר 45398021", "amount": 22705.48, "as_of": "2026-10-30"},
+        {"id": "m5", "action": "set_balance", "label": "קרן מחר 45398023", "amount": 20989.39, "as_of": "2026-10-30"},
+        {"id": "m6", "action": "set_balance", "label": "קרן השתלמות אינפינטי", "amount": 3616, "as_of": "2026-11-04"},
+    ], ensure_ascii=False), encoding="utf-8")
+    lines = datafixes.apply(conn, home, app, date(2026, 11, 4))
+    assert not any(l.startswith("skipped") or "failed" in l for l in lines), lines
+    rows = {r["label"]: (r["kind"], r["owner"]) for r in conn.execute(
+        "SELECT a.label, a.kind, o.name AS owner FROM accounts a LEFT JOIN owners o ON o.id = a.owner_id")}
+    assert rows["קרן מחר 45398023"] == ("pension", "Ely") and rows["קרן השתלמות אינפינטי"] == ("pension", "Ely")
+    latest = {r["label"]: r["amount"] for r in conn.execute(
+        "SELECT a.label, b.amount FROM balances b JOIN accounts a ON a.id = b.account_id WHERE b.as_of >= '2026-10-30'")}
+    assert latest == {"קרן מחר 45398021": 22705.48, "קרן מחר 45398023": 20989.39, "קרן השתלמות אינפינטי": 3616.0}
