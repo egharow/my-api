@@ -932,3 +932,23 @@ def test_buying_securities_counts_as_invested_even_when_the_destination_is_unkno
         (date(2026, 11, 2), "ניירות ערך קניה/90 מח תאMTF/5130620", -6419.83)]))])
     assert summary.invested(conn, "2026-09") == 8448.88
     assert summary.invested(conn, "2026-11") == 6419.83                                  # the reversed purchase nets out
+
+
+def test_a_whole_category_can_be_left_out_of_the_totals_and_turned_into_savings(app, conn):
+    from ftracker import categorize, summary
+    gid = conn.execute("SELECT id FROM categories WHERE name = 'Groceries'").fetchone()[0]
+    page = text(get(app, "/setup"))
+    assert "How each category counts" in page and f'name="t_{gid}"' in page
+    assert "Savings and investing" in page and "Left out of the totals" in page
+    before = {r["category"] for r in summary.spending_by_category(conn, "2026-09")}
+    res = post(app, "/setup/category/treatment", {f"t_{gid}": "left_out"})
+    assert res.status == 303
+    assert conn.execute("SELECT neutral FROM categories WHERE id = ?", (gid,)).fetchone()[0] == 1
+    assert "Groceries" not in {r["category"] for r in summary.spending_by_category(conn, "2026-09")}
+    post(app, "/setup/category/treatment", {f"t_{gid}": "spending"})
+    assert conn.execute("SELECT neutral FROM categories WHERE id = ?", (gid,)).fetchone()[0] == 0
+    post(app, "/setup/category/treatment", {f"t_{gid}": "saving"})
+    assert conn.execute("SELECT kind, neutral FROM categories WHERE id = ?", (gid,)).fetchone()[:] == ("saving", 1)
+    unc = conn.execute("SELECT id FROM categories WHERE name = 'Uncategorised'").fetchone()[0]
+    assert categorize.set_treatment(conn, unc, "left_out") is False                      # Uncategorised is never left out by accident
+    assert before is not None

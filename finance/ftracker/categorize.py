@@ -348,7 +348,7 @@ def delete_rule(conn: sqlite3.Connection, rule_id: int) -> None:
 
 def category_counts(conn: sqlite3.Connection):
     return conn.execute(
-        """SELECT c.id, c.name, c.kind, COUNT(t.id) AS lines FROM categories c
+        """SELECT c.id, c.name, c.kind, c.neutral, COUNT(t.id) AS lines FROM categories c
            LEFT JOIN transactions t ON t.category_id = c.id GROUP BY c.id ORDER BY lines DESC, c.name""").fetchall()
 
 
@@ -392,3 +392,41 @@ def rename_category(conn: sqlite3.Connection, old: str, new: str) -> None:
         raise ValueError("unknown category")
     audit(conn, "rename_category", "category", None, f"{old} -> {new}")
     conn.commit()
+
+
+TREATMENTS = {
+    "spending": "Counts as spending",
+    "left_out": "Left out of the totals",
+    "saving": "Savings and investing (left out, counted as invested)",
+    "income": "Money coming in",
+}
+
+
+def treatment_of(kind: str, neutral: int) -> str:
+    if kind == "saving":
+        return "saving"
+    if kind == "income":
+        return "income"
+    return "left_out" if neutral else "spending"
+
+
+def set_treatment(conn: sqlite3.Connection, category_id: int, treatment: str) -> bool:
+    """Decide for a whole category how it counts. Every line in it follows, past and future. Returns True when something changed."""
+    row = conn.execute("SELECT name, kind, neutral FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if not row or row["name"] == "Uncategorised":
+        return False
+    if treatment not in TREATMENTS:
+        raise ValueError("unknown choice")
+    kind, neutral = row["kind"], row["neutral"]
+    if treatment == "spending":
+        kind, neutral = (kind if kind in ("expense", "fee", "debt") else "expense"), 0
+    elif treatment == "left_out":
+        kind, neutral = (kind if kind in ("expense", "fee", "debt", "transfer") else "transfer"), 1
+    elif treatment == "saving":
+        kind, neutral = "saving", 1
+    else:
+        kind, neutral = "income", 0
+    if (kind, neutral) == (row["kind"], row["neutral"]):
+        return False
+    conn.execute("UPDATE categories SET kind = ?, neutral = ? WHERE id = ?", (kind, neutral, category_id))
+    return True

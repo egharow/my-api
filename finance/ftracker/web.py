@@ -600,6 +600,13 @@ class App:
             if path == "/setup/category/merge":
                 res = categorize.merge_category(conn, form["src"], form["dst"])
                 return self._redirect("/setup", f"“{form['src']}” merged into “{form['dst']}”: {res['lines']} lines moved")
+            if path == "/setup/category/treatment":
+                changed = 0
+                for key, val in form.items():
+                    if key.startswith("t_") and key[2:].isdigit():
+                        changed += 1 if categorize.set_treatment(conn, int(key[2:]), val) else 0
+                conn.commit()
+                return self._redirect("/setup", f"{changed} categor{'y' if changed == 1 else 'ies'} changed. Your totals now follow." if changed else "Nothing changed.")
             if path == "/setup/category/rename":
                 categorize.rename_category(conn, form["old"], form.get("new", ""))
                 return self._redirect("/setup", f"Renamed to “{form['new'].strip()}”")

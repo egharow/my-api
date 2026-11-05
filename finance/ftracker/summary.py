@@ -308,7 +308,7 @@ def invested(conn: sqlite3.Connection, month: str, owner: str | None = None) -> 
                                               ELSE 0 END), 0), 2)
                 FROM transactions t JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
                 LEFT JOIN accounts cp ON cp.id = t.counterparty_account_id LEFT JOIN categories c ON c.id = t.category_id
-                WHERE t.budget_month = ? AND t.kind = 'transfer'{where}""",
+                WHERE t.budget_month = ? AND (t.kind = 'transfer' OR c.kind = 'saving'){where}""",
             args).fetchone()[0]
     return conn.execute(
         f"""SELECT ROUND(COALESCE(SUM(e.actual), 0), 2) FROM monthly_entries e LEFT JOIN owners o ON o.id = e.owner_id

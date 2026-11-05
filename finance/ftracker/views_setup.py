@@ -202,6 +202,19 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
     cat_rows = "".join(f'<tr><td dir="auto">{esc(c["name"])}</td><td>{esc(c["kind"])}</td><td class="n">{c["lines"]}</td></tr>' for c in cc)
     pick = lambda name, skip=False: (f'<select name="{name}" required>' + "".join(
         f'<option>{esc(c["name"])}</option>' for c in cc if not (skip and c["name"] == "Uncategorised")) + "</select>")
+    treat_rows = "".join(
+        f'<tr><td dir="auto">{esc(c["name"])}</td><td><select name="t_{c["id"]}">'
+        + "".join(f'<option value="{k}"{" selected" if k == categorize.treatment_of(c["kind"], c["neutral"]) else ""}>{esc(label)}</option>'
+                  for k, label in categorize.TREATMENTS.items())
+        + f'</select></td><td class="n">{c["lines"]}</td></tr>' for c in cc if c["name"] != "Uncategorised")
+    treat = ('<section class="card" style="margin-top:12px"><h2>How each category counts</h2>'
+             '<p class="muted">Decide once for a whole category, not payment by payment. <b>Counts as spending</b> shows in your expenses. '
+             '<b>Left out of the totals</b> keeps the lines in your records but out of expenses (for example card payments and moves between your accounts). '
+             '<b>Savings and investing</b> is left out of expenses and shows as money invested. Every line in the category follows, past and future.</p>'
+             + _form(ctx, "/setup/category/treatment",
+                     charts.scroll(f'<table><thead><tr><th>Category</th><th>How it counts</th><th class="n">Lines</th></tr></thead><tbody>{treat_rows}</tbody></table>')
+                     + '<p><button>Save</button></p>') + "</section>")
+    out.append(treat)
     out.append('<section class="card" style="margin-top:12px"><h2>Categories</h2><p class="muted">Merge a category into another (all its lines and rules move), '
                'or rename one. Use this to tidy names from your old sheet.</p>'
                + _form(ctx, "/setup/category/merge", f"Merge {pick('src', True)} into {pick('dst')} <button>Merge</button>", "row")
