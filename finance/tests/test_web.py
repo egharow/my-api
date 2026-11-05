@@ -921,3 +921,14 @@ def test_the_home_page_can_take_statements(app):
     phone = App(app.home, today="2026-10-05", phone_pin="123456")
     ro = phone.handle("GET", "/", {**H, "x-client-ip": "10.0.0.9", "cookie": f"auth={phone._auth_token()}"})
     assert ro.status == 200 and "Import statements" not in text(ro) and 'id="drop"' not in text(ro)      # the phone only looks
+
+
+def test_buying_securities_counts_as_invested_even_when_the_destination_is_unknown(home, conn, monkeypatch):
+    from ftracker import summary
+    run_import(home, conn, monkeypatch, [("b.pdf", bank_file([
+        (date(2026, 9, 29), "ניירות ערך קניה/125 הראל מחק/5122510", -8448.88),
+        (date(2026, 11, 1), "ניירות ערך קניה/90 מח תאMTF/5130620", -6498.58),
+        (date(2026, 11, 2), "ניירות ערך קניה/90 מח תאMTF/5130620", 6498.58),          # the same purchase reversed
+        (date(2026, 11, 2), "ניירות ערך קניה/90 מח תאMTF/5130620", -6419.83)]))])
+    assert summary.invested(conn, "2026-09") == 8448.88
+    assert summary.invested(conn, "2026-11") == 6419.83                                  # the reversed purchase nets out

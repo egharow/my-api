@@ -293,21 +293,23 @@ def income_lines(conn: sqlite3.Connection, source: str, months: list[str]):
 def invested(conn: sqlite3.Connection, month: str, owner: str | None = None) -> float:
     """Money put into savings or investments in a month. It is not spent: it counts as kept.
 
-    Months with a bank statement use transfers whose destination is an investment, pension or savings account;
-    older months use the savings lines of your old sheet. A transfer to an account of an unknown kind counts as nothing.
+    Months with a bank statement count two kinds of line: transfers whose destination is an investment, pension or
+    savings account, and any transfer you or a rule filed under a savings category ("Transfer to savings"), even when
+    the destination account is not known, such as buying securities. A purchase that was reversed nets to nothing.
+    Older months use the savings lines of your old sheet.
     """
-    if month in _bank_months(conn):
-        where, args = "", [month]
-        if owner:
-            where, args = " AND o.name = ?", [month, owner]
-        return conn.execute(
-            f"""SELECT ROUND(COALESCE(SUM(-t.amount), 0), 2) FROM transactions t JOIN accounts cp ON cp.id = t.counterparty_account_id
-                JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
-                WHERE t.budget_month = ? AND t.kind = 'transfer' AND t.amount < 0 AND cp.kind IN ('investment','pension','savings'){where}""",
-            args).fetchone()[0]
     where, args = "", [month]
     if owner:
         where, args = " AND o.name = ?", [month, owner]
+    if month in _bank_months(conn):
+        return conn.execute(
+            f"""SELECT ROUND(COALESCE(SUM(CASE WHEN c.kind = 'saving' THEN -t.amount
+                                              WHEN t.amount < 0 AND cp.kind IN ('investment','pension','savings') THEN -t.amount
+                                              ELSE 0 END), 0), 2)
+                FROM transactions t JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id
+                LEFT JOIN accounts cp ON cp.id = t.counterparty_account_id LEFT JOIN categories c ON c.id = t.category_id
+                WHERE t.budget_month = ? AND t.kind = 'transfer'{where}""",
+            args).fetchone()[0]
     return conn.execute(
         f"""SELECT ROUND(COALESCE(SUM(e.actual), 0), 2) FROM monthly_entries e LEFT JOIN owners o ON o.id = e.owner_id
             WHERE e.month = ? AND e.section = 'saving'{where}""", args).fetchone()[0]
