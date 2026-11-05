@@ -124,6 +124,8 @@ def _line(ctx: Ctx, r, cat_opts: str, back: str) -> str:
         note.append(esc(r["detail"]))
     if r["instalment_no"] and r["instalment_total"]:
         note.append(f'instalment {r["instalment_no"]} of {r["instalment_total"]}')
+    if r["budget_month"] != r["txn_date"][:7]:
+        note.append(f'counted in {month_label(r["budget_month"])}')
     if r["left_out"]:
         note.append("left out of the totals")
     cat = r["cat"]

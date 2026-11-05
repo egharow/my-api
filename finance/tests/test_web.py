@@ -828,3 +828,10 @@ def test_sidebar_has_the_grouped_screens_and_phone_tabs(app):
         assert label in t
     more = text(get(app, "/more"))
     assert "Budgets" in more and "Settings" in more
+
+
+def test_a_line_counted_in_another_month_says_so(app, conn):
+    conn.execute("UPDATE transactions SET budget_month = '2026-10' WHERE description = 'ONE OFF SERVICE'")
+    conn.commit()
+    assert "counted in October 2026" in text(get(app, "/transactions?m=all"))
+    assert "counts in October 2026" in text(get(app, "/?find=ONE+OFF"))

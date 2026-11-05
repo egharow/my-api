@@ -228,7 +228,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
         rows = summary.find_lines(conn, find)
         body = (f'<div class="card"><h2>Payments matching “{esc(find)}” ({len(rows)})</h2><div style="overflow-x:auto"><table class="ct"><thead><tr><th>Date</th><th>Description</th>'
                 f'<th>Account</th><th>Category</th><th class="n">Amount ₪</th><th></th></tr></thead><tbody>'
-                + "".join(f'<tr><td>{esc(r["txn_date"])}</td><td dir="auto">{esc(r["description"])}</td><td dir="auto" class="muted">{esc(r["account"])}</td>'
+                + "".join(f'<tr><td>{esc(r["txn_date"])}{"<div class=cap>counts in " + esc(month_label(r["budget_month"])) + "</div>" if r["budget_month"] != r["txn_date"][:7] else ""}</td><td dir="auto">{esc(r["description"])}</td><td dir="auto" class="muted">{esc(r["account"])}</td>'
                           f'<td>{esc(r["category"])}{" ?" if r["category_status"] == "proposed" else ""}</td><td class="n">{r["spent"]:,.2f}</td>'
                           f'<td>{_change_form(ctx, r["id"], cats, back, r["budget_month"])}</td></tr>' for r in rows)
                 + '</tbody></table></div><p class="cap">Amounts are money out; refunds and income show as negative. A “?” means only proposed so far.</p></div>')
