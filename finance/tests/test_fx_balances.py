@@ -102,7 +102,8 @@ def test_automatic_refresh_is_rate_limited(conn):
     assert fx.ensure_fresh(conn, "2026-10-05", net) is None                          # not again for a few hours
     conn.execute("UPDATE settings SET value = ? WHERE key = 'fx_last_attempt'",
                  ((datetime.now() - timedelta(hours=7)).isoformat(),))
-    assert fx.ensure_fresh(conn, "2026-10-05", net)["status"] == "failed" and len(net.calls) == 4
+    first = len(net.calls)
+    assert fx.ensure_fresh(conn, "2026-10-05", net)["status"] == "failed" and len(net.calls) == 2 * first
 
 
 def test_unexpected_responses_are_rejected_not_trusted():
@@ -145,3 +146,37 @@ def test_fetching_automatically_replaces_a_rate_you_typed_earlier(conn):
     conn.commit()
     assert fx.refresh_current(conn, "2026-10-05", FakeNet({"frankfurter": FRANKFURTER}))["status"] == "fresh"
     assert fx.current_rate(conn)["rate"] == 3.2
+
+
+BOI_ONE = json.dumps({"key": "USD", "currentExchangeRate": 3.2, "currentChange": 0.31, "unit": 1, "lastUpdate": "2026-10-05T15:31:00"})
+BOI_ALL = json.dumps({"exchangeRates": [{"key": "EUR", "currentExchangeRate": 3.7, "unit": 1, "lastUpdate": "2026-10-05T15:31:00"},
+                                        {"key": "USD", "currentExchangeRate": 3.2, "unit": 1, "lastUpdate": "2026-10-05T15:31:00"}]})
+
+
+def test_the_bank_of_israel_rate_is_read_in_either_of_its_layouts():
+    assert fx.parse_boi_json(BOI_ONE) == ("2026-10-05", 3.2)
+    assert fx.parse_boi_json(BOI_ALL) == ("2026-10-05", 3.2)
+    with pytest.raises(ValueError):
+        fx.parse_boi_json(json.dumps({"key": "USD", "currentExchangeRate": 99, "unit": 1}))      # an absurd number is not trusted
+    with pytest.raises(ValueError):
+        fx.parse_boi_json(json.dumps({"exchangeRates": [{"key": "EUR", "currentExchangeRate": 3.7}]}))
+
+
+def test_the_bank_of_israel_rate_wins_over_the_free_web_rates(conn):
+    fx.set_rate(conn, "2026-10-05", "USD", "ILS", 3.13, "web")               # a rate fetched earlier from a free source
+    conn.commit()
+    res = fx.refresh_current(conn, "2026-10-05", FakeNet({"boi.org.il": BOI_ONE, "frankfurter": FRANKFURTER}), force=True)
+    cur = fx.current_rate(conn)
+    assert res["source"] == "boi" and cur["rate"] == 3.2 and cur["source"] == "boi"
+    assert conn.execute("SELECT COUNT(*) FROM fx_rates WHERE source = 'web'").fetchone()[0] == 0
+
+
+def test_the_web_rates_are_the_fallback_when_the_bank_of_israel_does_not_answer(conn):
+    res = fx.refresh_current(conn, "2026-10-05", FakeNet({"frankfurter": FRANKFURTER}), force=True)
+    assert res["status"] == "fetched" and res["source"] == "frankfurter"
+
+
+def test_the_bank_of_israel_data_service_is_the_second_try(conn):
+    csv_body = "TIME_PERIOD,OBS_VALUE\n2026-10-02,3.19\n2026-10-05,3.2\n"
+    res = fx.refresh_current(conn, "2026-10-05", FakeNet({"edge.boi.gov.il": csv_body}), force=True)
+    assert res["source"] == "boi" and res["rate"] == 3.2 and res["date"] == "2026-10-05"

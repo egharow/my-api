@@ -5,6 +5,7 @@ date) is available if you ever want it."""
 import csv
 import io
 import json
+import re
 import sqlite3
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -16,7 +17,12 @@ MAX_AGE_DAYS = 1
 
 BOI_URL = ("https://edge.boi.gov.il/FusionEdgeServer/sdmx/v2/data/dataflow/BOI.STATISTICS/EXR/1.0"
            "?c%5BDATA_TYPE%5D=OF00&c%5BBASE_CURRENCY%5D={base}&startperiod={start}&endperiod={end}&format=csv")
-# Tried in order. These are public, key-free sources; the first that answers wins.
+# The Bank of Israel representative rate comes first. Its JSON service is tried, then its data service (the same numbers).
+BOI_JSON_URLS = [
+    "https://www.boi.org.il/PublicApi/GetExchangeRate?key=USD&asXml=false",
+    "https://www.boi.org.il/PublicApi/GetExchangeRates?asXml=false",
+]
+# Tried in order, only when the Bank of Israel does not answer. These are public, key-free sources.
 WEB_SOURCES = [
     ("https://api.frankfurter.dev/v1/latest?base=USD&symbols=ILS", "frankfurter"),
     ("https://open.er-api.com/v6/latest/USD", "er-api"),
@@ -123,18 +129,74 @@ def parse_web_rate(text: str) -> tuple[str, float]:
     raise ValueError("unexpected rate response")
 
 
+def parse_boi_json(text: str) -> tuple[str | None, float]:
+    """The Bank of Israel's JSON: an entry with key USD and currentExchangeRate (per `unit` dollars). Returns (iso date or None, ILS per USD)."""
+    def entries(o):
+        if isinstance(o, dict):
+            if str(o.get("key", "")).upper() == "USD" and "currentExchangeRate" in o:
+                yield o
+            for v in o.values():
+                yield from entries(v)
+        elif isinstance(o, list):
+            for v in o:
+                yield from entries(v)
+    for e in entries(json.loads(text)):
+        rate = float(e["currentExchangeRate"]) / (float(e.get("unit") or 1) or 1)
+        if not 1.5 < rate < 8:
+            raise ValueError("the Bank of Israel rate looks wrong")
+        stamp = str(e.get("lastUpdate") or "")
+        return (stamp[:10] if re.match(r"\d{4}-\d{2}-\d{2}", stamp) else None), rate
+    raise ValueError("no dollar rate in the Bank of Israel answer")
+
+
+def _boi_rate(conn: sqlite3.Connection, today: str, opener) -> dict | None:
+    """Fetch the Bank of Israel rate by either of its services. Returns the stored rate, or None."""
+    day = rate = None
+    for url in BOI_JSON_URLS:
+        try:
+            day, rate = parse_boi_json(_get(url, opener))
+            break
+        except Exception:
+            continue
+    if rate is None:
+        try:
+            end = date.fromisoformat(today)
+            if fetch_boi(conn, end - timedelta(days=10), end, "USD", opener) > 0:
+                row = conn.execute("SELECT rate_date, rate FROM fx_rates WHERE base='USD' AND quote='ILS' AND source='boi' ORDER BY rate_date DESC LIMIT 1").fetchone()
+                if row:
+                    day, rate = row["rate_date"], row["rate"]
+        except Exception:
+            return None
+    if rate is None:
+        return None
+    day = min(day or today, today)
+    set_rate(conn, day, "USD", "ILS", rate, "boi")
+    # older fetched rates from the free web sources would outrank a Bank of Israel rate dated a day earlier: drop them
+    conn.execute("DELETE FROM fx_rates WHERE base='USD' AND quote='ILS' AND source='web' AND rate_date >= ?",
+                 ((date.fromisoformat(today) - timedelta(days=30)).isoformat(),))
+    conn.commit()
+    return {"status": "fetched", "rate": rate, "date": day, "source": "boi"}
+
+
 def refresh_current(conn: sqlite3.Connection, today: str, opener=urllib.request.urlopen, force: bool = False, replace_typed: bool = False) -> dict:
-    """Fetch today's USD/ILS rate if the one we hold is stale. With replace_typed, a rate you typed yourself is dropped for the fresh one. Never raises: offline is fine."""
+    """Fetch today's USD/ILS rate if the one we hold is stale. With replace_typed, a rate you typed yourself is dropped for the fresh one."""
     have = current_rate(conn)
     if not force and have and have["date"] >= (date.fromisoformat(today) - timedelta(days=MAX_AGE_DAYS)).isoformat():
         return {"status": "fresh", **have}
-    errors = []
+    def drop_typed():
+        if replace_typed:              # "Fetch automatically" means: forget a rate I typed myself and use the fresh one
+            conn.execute("DELETE FROM fx_rates WHERE base = 'USD' AND quote = 'ILS' AND source = 'manual' AND rate_date >= ?",
+                         ((date.fromisoformat(today) - timedelta(days=30)).isoformat(),))
+    boi = _boi_rate(conn, today, opener)
+    if boi:
+        drop_typed()
+        conn.commit()
+        return boi
+    errors = ["boi: no answer"]
     for url, name in WEB_SOURCES:
         try:
             day, rate = parse_web_rate(_get(url, opener))
-            if replace_typed:              # "Fetch automatically" means: forget a rate I typed myself today or earlier and use the fresh one
-                conn.execute("DELETE FROM fx_rates WHERE base = 'USD' AND quote = 'ILS' AND source = 'manual' AND rate_date >= ?",
-                             ((date.fromisoformat(today) - timedelta(days=30)).isoformat(),))
+            drop_typed()
             set_rate(conn, min(day, today), "USD", "ILS", rate, "web")
             conn.commit()
             return {"status": "fetched", "rate": rate, "date": min(day, today), "source": name}
