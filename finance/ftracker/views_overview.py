@@ -152,6 +152,14 @@ def _tasks(conn: sqlite3.Connection, ctx: Ctx) -> str:
         chips.append(f'<a class="chip" href="/review"><b>{c["review"]}</b> payments to sort</a>')
     if pend:
         chips.append(f'<a class="chip" href="/balances"><b>{len(pend)}</b> balances to update</a>')
+    from . import checks
+    ck_month = checks.default_month(conn)
+    n_ck = checks.todo_count(conn, ck_month) if ck_month else 0
+    if n_ck:
+        chips.append(f'<a class="chip" href="/check"><b>{n_ck}</b> expenses to check in {month_label(ck_month)}</a>')
+    n_fl = checks.flagged_count(conn)
+    if n_fl:
+        chips.append(f'<a class="chip" href="/check#flagged"><b>{n_fl}</b> flagged expense{"s" if n_fl != 1 else ""}</a>')
     if ctx.screens_waiting:
         chips.append(f'<a class="chip" href="/screen/{esc(ctx.screens_waiting[0])}"><b>{len(ctx.screens_waiting)}</b> balance screenshot(s) to check</a>')
     if c["items"]:

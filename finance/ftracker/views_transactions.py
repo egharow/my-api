@@ -53,6 +53,13 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         where.append("c.name = ?"); args.append(cat)
     if st != "all":
         where.append("t.category_status = ?"); args.append("approved" if st == "confirmed" else "proposed")
+    ck = q.get("ck") if q.get("ck") in ("todo", "ok", "question") else ""
+    if ck:
+        from . import checks
+        where.append(checks.SPEND)
+        where.append("t.check_state IS NULL" if ck == "todo" else "t.check_state = ?")
+        if ck != "todo":
+            args.append(ck)
     if text:
         n = _num(text)
         like = f"%{text}%"
@@ -61,7 +68,7 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         else:
             where.append("(t.description LIKE ? OR t.detail LIKE ?)"); args += [like, like]
     sql = ("""SELECT t.id, t.txn_date, t.budget_month, t.description, t.detail, t.amount, t.currency, t.category_status, t.left_out,
-                     t.instalment_no, t.instalment_total, c.name AS cat, a.label AS account
+                     t.instalment_no, t.instalment_total, t.check_state, t.check_reason, c.name AS cat, a.label AS account
               FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id"""
            + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY t.txn_date DESC, t.id DESC LIMIT ?")
     rows = conn.execute(sql, args + [limit + 1]).fetchall()
@@ -79,6 +86,7 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
             '<select name="acct" aria-label="Account">' + opt("", "All accounts", acct) + "".join(opt(a["id"], a["label"], acct) for a in accounts) + "</select>"
             '<select name="cat" aria-label="Category">' + opt("", "All categories", cat) + "".join(opt(c, c, cat) for c in cats) + "</select>"
             '<select name="st" aria-label="Status">' + opt("all", "All", st) + opt("confirmed", "Confirmed", st) + opt("guessed", "Guessed", st) + "</select>"
+            '<select name="ck" aria-label="Expense check">' + opt("", "Any check", ck) + opt("todo", "Not checked", ck) + opt("ok", "Checked", ck) + opt("question", "Flagged", ck) + "</select>"
             "<button>Show</button></form>")
 
     counted = [r for r in rows if not r["left_out"]]
@@ -89,7 +97,7 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
             f'<span>Out <span class="mono">{"−" if out else ""}{abs(out):,.2f}</span></span>'
             '<span class="tkey"><span><i class="mk ok"></i>confirmed</span><span><i class="mk guess"></i>guessed</span></span></div>')
 
-    back = "/transactions?" + urlencode({k: v for k, v in q.items() if k in ("q", "m", "acct", "cat", "st", "n") and v})
+    back = "/transactions?" + urlencode({k: v for k, v in q.items() if k in ("q", "m", "acct", "cat", "st", "ck", "n") and v})
     cat_opts = _cat_options(conn)
     body, day, day_rows = [], None, []
 
@@ -109,7 +117,7 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     if not rows:
         body.append('<p class="cap" style="padding:16px 20px">Nothing matches these filters.</p>')
     if more:
-        nxt = urlencode({**{k: v for k, v in q.items() if k in ("q", "m", "acct", "cat", "st") and v}, "n": limit + PAGE})
+        nxt = urlencode({**{k: v for k, v in q.items() if k in ("q", "m", "acct", "cat", "st", "ck") and v}, "n": limit + PAGE})
         body.append(f'<div class="tmore"><a href="/transactions?{nxt}">Show more</a></div>')
     head = '<div class="pagehead"><h1>Transactions</h1></div>'
     table = ('<div class="tbl"><div class="thead"><span></span><span>Merchant</span><span>Category</span><span>Account</span><span class="r">Amount</span></div>'
@@ -126,6 +134,10 @@ def _line(ctx: Ctx, r, cat_opts: str, back: str) -> str:
         note.append(f'instalment {r["instalment_no"]} of {r["instalment_total"]}')
     if r["budget_month"] != r["txn_date"][:7]:
         note.append(f'counted in {month_label(r["budget_month"])}')
+    if r["check_state"] == "ok":
+        note.append("✓ checked")
+    elif r["check_state"] == "question":
+        note.append("flagged: not recognised")
     if r["left_out"]:
         note.append("left out of the totals")
     cat = r["cat"]

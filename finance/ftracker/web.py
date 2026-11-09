@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, servermode, driveserver
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, servermode, driveserver
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -259,6 +259,8 @@ class App:
             return _html(200, views_home.upload_page(conn, ctx))
         if path == "/transactions":
             return _html(200, views_transactions.transactions_page(conn, ctx, q))
+        if path == "/check":
+            return _html(200, views_check.check_page(conn, ctx, q))
         if path == "/more":
             return _html(200, views_home.more_page(conn, ctx))
         if path in ("/spending", "/trends"):
@@ -448,6 +450,22 @@ class App:
                 if auto:
                     msg += f". {auto} more approved by themselves (merchants you have approved 3+ times)"
                 return self._redirect("/review", msg, err=bool(skipped and not done))
+            if path == "/check/mark":
+                ids = [int(i) for i in multi.get("id", []) if i.isdigit()]
+                state = form.get("state") or None
+                try:
+                    n = checks.mark(conn, ids, state, who, form.get("reason", ""), form.get("note", ""))
+                except ValueError as exc:
+                    if headers.get("x-ajax"):
+                        return self._json(200, {"ok": False, "error": str(exc)})
+                    return self._redirect(form.get("back", "/check"), str(exc), err=True)
+                if headers.get("x-ajax"):
+                    return self._json(200, {"ok": True, "changed": n})
+                where = form.get("back", "/check")
+                if not where.startswith("/") or where.startswith("//") or "://" in where or "\n" in where:
+                    where = "/check"
+                msg = {"ok": f"{n} marked as happened", "question": f"{n} flagged", None: f"{n} back to unchecked"}[state]
+                return self._redirect(where, msg)
             if path == "/approve/strong":
                 done = 0
                 for g in conn.execute(

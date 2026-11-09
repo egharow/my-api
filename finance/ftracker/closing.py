@@ -35,6 +35,13 @@ def checks(conn: sqlite3.Connection, month: str, today: str) -> list[dict]:
     sort = conn.execute("SELECT COUNT(DISTINCT description_norm) FROM transactions WHERE budget_month = ? AND category_status = 'proposed'", (month,)).fetchone()[0]
     out.append({"label": "Payments are sorted", "ok": sort == 0,
                 "detail": f"{sort} merchant(s) still waiting for your approval." if sort else "Every payment has a category you approved.", "link": "/review"})
+    from . import checks
+    c = checks.counts(conn, month)
+    if c["total"]:
+        open_n = c["todo"] + c["question"]
+        out.append({"label": "Expenses are checked", "ok": open_n == 0,
+                    "detail": (f"{c['todo']} not checked yet" + (f", {c['question']} flagged" if c["question"] else "") + ". You can still close the month.") if open_n
+                    else "Every expense was marked as happened.", "link": f"/check?m={month}"})
     drafts = conn.execute("SELECT COUNT(*) FROM batches WHERE status != 'committed'").fetchone()[0]
     out.append({"label": "Imports are submitted", "ok": drafts == 0,
                 "detail": f"{drafts} import(s) not submitted yet." if drafts else "Nothing is waiting to be submitted.", "link": "/imports"})

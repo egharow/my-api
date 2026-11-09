@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Version 1 is schema.sql as first released. Later changes are migrations, applied in order,
 # so a database made by an earlier build is upgraded in place and keeps its data.
-MIGRATIONS = [(2, "002_monthly_entries.sql"), (3, "003_goals.sql"), (4, "004_member_card.sql"), (5, "005_drop_card_rates.sql"), (6, "006_reimbursed.sql"), (7, "007_wealth_filter.sql"), (8, "008_card_payers.sql"), (9, "009_card_payer_rules.sql"), (10, "010_card_payer_rule_leumi.sql"), (11, "011_account_order_and_closing.sql"), (12, "012_left_out.sql"), (13, "013_budgets.sql"), (14, "014_travel.sql"), (15, "015_no_online_shopping.sql"), (16, "016_trips.sql"), (17, "017_onezero_cal_rules.sql"), (18, "018_screen_aliases.sql"), (19, "019_refund_links.sql"), (20, "020_leumi_securities_rules.sql")]
+MIGRATIONS = [(2, "002_monthly_entries.sql"), (3, "003_goals.sql"), (4, "004_member_card.sql"), (5, "005_drop_card_rates.sql"), (6, "006_reimbursed.sql"), (7, "007_wealth_filter.sql"), (8, "008_card_payers.sql"), (9, "009_card_payer_rules.sql"), (10, "010_card_payer_rule_leumi.sql"), (11, "011_account_order_and_closing.sql"), (12, "012_left_out.sql"), (13, "013_budgets.sql"), (14, "014_travel.sql"), (15, "015_no_online_shopping.sql"), (16, "016_trips.sql"), (17, "017_onezero_cal_rules.sql"), (18, "018_screen_aliases.sql"), (19, "019_refund_links.sql"), (20, "020_leumi_securities_rules.sql"), (21, "021_expense_checks.sql")]
 SCHEMA_VERSION = MIGRATIONS[-1][0]
 
 

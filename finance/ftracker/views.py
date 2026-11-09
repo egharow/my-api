@@ -333,6 +333,19 @@ a{color:var(--accent)}
 .nwcard:hover{border-color:var(--ink)}
 .band{display:flex;flex-wrap:wrap;align-items:center;gap:8px 24px;padding:12px 18px;background:var(--surface);border:1px solid var(--border);border-top:0;font-size:13px;color:var(--ink2)}
 .band .bar{flex:1 1 240px;height:6px;background:var(--grid)}.band .bar span{display:block;height:6px;background:var(--ink)}
+/* check expenses */
+.ckday{display:grid;grid-template-columns:1fr auto auto;gap:16px;align-items:center;padding:12px 20px 6px;font-size:13px;font-weight:600;color:var(--ink2);border-bottom:1px solid var(--grid);background:var(--surface)}
+.cklist{background:var(--surface);margin-top:12px}
+.ckrow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:16px;align-items:center;min-height:52px;padding:6px 20px;border-bottom:1px solid var(--grid)}
+.ckrow.cur{background:color-mix(in srgb,var(--accent) 10%,transparent);box-shadow:inset 0 0 0 1px var(--accent)}
+.ckrow .mer{min-width:0}.ckrow .mer .cap{display:block}.ckrow .acts{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap}
+.ckrow .okb{min-width:44px;height:40px;font-size:18px}.ckrow.ok .mer{opacity:.6}
+.qbox>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-width:44px;height:40px;border:1px solid var(--axis);font-weight:600}
+.qbox>summary::-webkit-details-marker{display:none}.qbox[open]{flex-basis:100%}.qbox[open]>summary{border-color:var(--ink)}
+.qbox form{margin-top:8px}.flag{color:#8a5a00;font-weight:600;font-size:13px}
+.flagbox{border-top:2px solid #8a5a00!important;margin-bottom:16px}.flagbox .ckrow{padding-left:0;padding-right:0}
+.nb.off{opacity:.35}
+@media (max-width:820px){.ckrow{grid-template-columns:minmax(0,1fr) auto;padding:8px 16px}.ckrow .acts{grid-column:1/3;justify-content:flex-start}.ckday{grid-template-columns:1fr auto;padding:12px 16px 6px}.ckday span:last-child{grid-column:1/3}}
 /* transactions */
 .tfilter{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}.tfilter input[type=search]{flex:1 1 260px;min-width:0;height:40px}.tfilter select,.tfilter button{height:40px}
 .tsum{display:flex;flex-wrap:wrap;gap:8px 32px;padding:12px 20px;background:var(--surface);border-top:2px solid var(--rule);font-size:14px;color:var(--ink2)}
@@ -388,6 +401,7 @@ NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/recur
 ICONS = {
     "/": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
     "/review": "M4 12l5 5L20 6",
+    "/check": "M4 5h16v14H4zM8 12l3 3 5-6",
     "/transactions": "M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1",
     "/alerts": "M6 17v-6a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
     "/upload": "M12 15V4M7 9l5-5 5 5M5 20h14",
@@ -406,7 +420,7 @@ ICONS = {
 }
 # the sidebar, in groups (a title of None is a group without a heading)
 SIDE_GROUPS = [
-    (None, [("/", "Overview"), ("/review", "Review"), ("/transactions", "Transactions"), ("/alerts", "Alerts")]),
+    (None, [("/", "Overview"), ("/review", "Review"), ("/check", "Check expenses"), ("/transactions", "Transactions"), ("/alerts", "Alerts")]),
     ("Bring in", [("/upload", "Add statements"), ("/files", "Statements"), ("/balances", "Balances"), ("/cash", "Cash payments"), ("/close", "Close the month")]),
     ("Plan", [("/budgets", "Budgets"), ("/recurring", "Recurring"), ("/goals", "Goals"), ("/trips", "Trips"), ("/simulator", "Simulator"), ("/wealth", "Wealth")]),
     (None, [("/setup", "Settings")]),
@@ -446,6 +460,12 @@ def _badges(conn, ctx: Ctx, c: dict) -> dict:
     out = {"/review": (str(c["review"]) if c["review"] else "")}
     if ctx.readonly:
         return out
+    try:
+        from . import checks
+        todo = checks.todo_count(conn)
+        out["/check"] = str(todo) if todo else ""
+    except Exception:
+        pass
     miss = _missing_statements(conn, ctx)
     out["/files"] = f"{miss} missing" if miss else ""
     try:
