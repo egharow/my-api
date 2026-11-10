@@ -2,4 +2,7 @@
 /.eggs
 /build
 /.venv
-/helloworld.egg-info
+/helloworld.egg-info/presale_tracker_state.json
+/presale_digest.md
+__pycache__/
+.pytest_cache/

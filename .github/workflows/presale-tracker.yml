@@ -1,0 +1,46 @@
+name: Presale tracker
+
+on:
+  schedule:
+    - cron: "17 13 * * *"   # daily 13:17 UTC; the weekly Firecrawl scrape runs when 7 days have passed
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "auto, weekly or daily"
+        default: "auto"
+
+concurrency: presale-tracker
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests
+      - name: Restore tracker state
+        uses: actions/cache@v4
+        with:
+          path: presale_tracker_state.json
+          key: presale-state-${{ github.run_id }}
+          restore-keys: presale-state-
+      - name: Run tracker
+        env:
+          FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+          TICKETMASTER_API_KEY: ${{ secrets.TICKETMASTER_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          TRACKER_EXTRA_ARTISTS: ${{ vars.TRACKER_EXTRA_ARTISTS }}
+          TRACKER_COUNTRIES: ${{ vars.TRACKER_COUNTRIES }}
+        run: python -m presale_tracker "${{ github.event.inputs.mode || 'auto' }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: presale-digest
+          path: presale_digest.md
+          if-no-files-found: ignore
