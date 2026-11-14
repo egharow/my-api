@@ -983,3 +983,26 @@ def test_old_hand_filed_savings_lines_are_repaired_and_paired(home, conn, monkey
     assert categorize.repair_transfer_kinds(conn) == 1
     assert conn.execute("SELECT kind FROM transactions WHERE id = ?", (tid,)).fetchone()[0] == "transfer"
     assert categorize.repair_transfer_kinds(conn) == 0                                                       # nothing more to do
+
+
+def test_income_is_broken_down_by_source_like_spending(app):
+    page = text(get(app, "/?p=month&m=2025-03"))
+    assert "Where the income came from" in page
+    assert page.index("Where it went") < page.index("Where the income came from")           # right after the spending breakdown
+    section = page.split("Where the income came from")[1]
+    assert '<details class="cat"' in section and 'class="cat foot"' in section              # sources you can open, and a total
+    later = text(get(app, "/?p=month&m=2025-04"))
+    assert "Where the income came from" not in later or "Share of income" in later          # with earlier months there is a comparison column
+
+
+def test_a_click_only_looks_at_waiting_lines_that_resemble_what_you_approved(home, conn, monkeypatch):
+    from ftracker import categorize
+    lines = [(date(2026, 8, d), f"CORNER SHOP {d}", -(20.0 + d)) for d in range(1, 6)] + [(date(2026, 9, 2), "CORNER SHOP NEW", -33.0), (date(2026, 9, 3), "LONELY GARAGE", -90.0)]
+    run_import(home, conn, monkeypatch, [("b.pdf", bank_file(lines))])
+    ids = {r["description"]: r["id"] for r in conn.execute("SELECT id, description FROM transactions")}
+    categorize.approve(conn, [ids[f"CORNER SHOP {d}"] for d in range(1, 6)], "Groceries", learn=False)
+    categorize.resuggest(conn, near=["CORNER SHOP 1"])
+    new = conn.execute("SELECT c.name, t.proposal_basis FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.description = 'CORNER SHOP NEW'").fetchone()
+    other = conn.execute("SELECT c.name FROM transactions t JOIN categories c ON c.id = t.category_id WHERE t.description = 'LONELY GARAGE'").fetchone()
+    assert new["name"] == "Groceries"                              # the resembling line got its suggestion
+    assert other["name"] != "Groceries"                            # an unrelated line was left alone

@@ -5,6 +5,8 @@ built-in dictionary. Otherwise a similar past transaction is suggested, or it go
 """
 import re
 import sqlite3
+import functools
+from collections import defaultdict
 from difflib import SequenceMatcher
 
 from .db import audit, now
@@ -39,25 +41,60 @@ def _source_rank(source: str) -> int:
     return {"user": 3, "learned": 2, "builtin": 1}[source]
 
 
-def find_rule(conn: sqlite3.Connection, desc_norm: str, amount: float, account_kind: str):
-    rules = conn.execute("SELECT * FROM rules WHERE enabled = 1").fetchall()
+def find_rule(conn: sqlite3.Connection, desc_norm: str, amount: float, account_kind: str, rules=None):
+    if rules is None:
+        rules = conn.execute("SELECT * FROM rules WHERE enabled = 1").fetchall()
     hits = [r for r in rules if _rule_matches(r, desc_norm, amount, account_kind)]
     if not hits:
         return None
     return max(hits, key=lambda r: (_source_rank(r["source"]), r["priority"], r["id"]))
 
 
-def _similar_past(conn: sqlite3.Connection, desc: str):
+class _Memory:
+    """What you have already approved, read once and shaped for fast lookups, so a batch of suggestions does not
+    re-read and re-compare the whole history for every single line."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.rules = conn.execute("SELECT * FROM rules WHERE enabled = 1").fetchall()
+        self.similar = [(merchant_key(r["description"]), r["category_id"], r["n"]) for r in conn.execute(
+            """SELECT description, category_id, COUNT(*) AS n FROM transactions
+               WHERE category_status = 'approved' AND category_id IS NOT NULL GROUP BY description, category_id""")]
+        self.guess: dict[bool, list] = {True: [], False: []}
+        self.index: dict[bool, dict] = {True: defaultdict(list), False: defaultdict(list)}
+        for r in conn.execute(
+                """SELECT t.description, t.category_id, (t.amount < 0) AS neg FROM transactions t JOIN categories c ON c.id = t.category_id
+                   WHERE t.category_status = 'approved' AND c.name != 'Uncategorised' AND t.kind IN ('purchase','other','refund')"""):
+            neg = bool(r["neg"])
+            toks = _tokens(r["description"])
+            i = len(self.guess[neg])
+            self.guess[neg].append((r["description"], r["category_id"], toks))
+            for tok in toks:
+                self.index[neg][tok].append(i)
+
+
+def _similar_past(conn: sqlite3.Connection, desc: str, mem: "_Memory | None" = None):
     key = merchant_key(desc)
-    rows = conn.execute(
-        """SELECT description, category_id, COUNT(*) AS n FROM transactions
-           WHERE category_status = 'approved' AND category_id IS NOT NULL
-           GROUP BY description, category_id""").fetchall()
+    if mem is not None:
+        rows = mem.similar
+    else:
+        rows = [(merchant_key(r["description"]), r["category_id"], r["n"]) for r in conn.execute(
+            """SELECT description, category_id, COUNT(*) AS n FROM transactions
+               WHERE category_status = 'approved' AND category_id IS NOT NULL
+               GROUP BY description, category_id""")]
     best = None
-    for r in rows:
-        score = SequenceMatcher(None, key, merchant_key(r["description"])).ratio()
-        if score >= SIMILARITY and (best is None or (score, r["n"]) > (best[0], best[1])):
-            best = (score, r["n"], r["category_id"])
+    sm = SequenceMatcher(None)
+    sm.set_seq1(key)
+    la = len(key)
+    for other, category_id, n in rows:
+        lb = len(other)
+        if la + lb == 0 or 2.0 * min(la, lb) / (la + lb) < SIMILARITY:             # lengths too different to be similar: skip at once
+            continue
+        sm.set_seq2(other)
+        if sm.quick_ratio() < SIMILARITY:                                           # cheap upper bound before the real comparison
+            continue
+        score = sm.ratio()
+        if score >= SIMILARITY and (best is None or (score, n) > (best[0], best[1])):
+            best = (score, n, category_id)
     return best
 
 
@@ -81,19 +118,20 @@ def _habit(conn: sqlite3.Connection, desc_norm: str, amount: float):
     return None
 
 
-def _tokens(desc: str) -> set[str]:
+@functools.lru_cache(maxsize=100000)
+def _tokens(desc: str) -> frozenset:
     """Words of a merchant name, plus 3-letter pieces so spelling variants still share evidence."""
     key = merchant_key(desc)
     words = {w for w in key.split() if len(w) >= 2}
     grams = {w[i:i + 3] for w in words for i in range(len(w) - 2)} if words else set()
-    return words | grams
+    return frozenset(words | grams)
 
 
 GUESS_MIN_SHARE = 0.55   # the winning category must hold at least this share of the evidence
 GUESS_MIN_LINES = 3      # and that evidence must come from at least this many past payments
 
 
-def _guess(conn: sqlite3.Connection, desc: str, amount: float):
+def _guess(conn: sqlite3.Connection, desc: str, amount: float, mem: "_Memory | None" = None):
     """Learn from every payment you already categorised: which category do this name's words point to?
 
     Returns (category_id, share, n_lines, example) or None. Only ever a suggestion for you to confirm.
@@ -101,25 +139,28 @@ def _guess(conn: sqlite3.Connection, desc: str, amount: float):
     toks = _tokens(desc)
     if not toks:
         return None
-    rows = conn.execute(
-        """SELECT t.description, t.category_id FROM transactions t JOIN categories c ON c.id = t.category_id
-           WHERE t.category_status = 'approved' AND c.name != 'Uncategorised' AND t.kind IN ('purchase','other','refund')
-             AND ((t.amount < 0) = (? < 0))""", (amount,)).fetchall()
+    neg = amount < 0
+    if mem is None:
+        mem = _Memory(conn)
+    rows = mem.guess[neg]
+    near: set[int] = set()
+    for tok in toks:                                        # only past payments that share a word or piece can score at all
+        near.update(mem.index[neg].get(tok, ()))
     score: dict[int, float] = {}
     support: dict[int, int] = {}
     example: dict[int, tuple[float, str]] = {}
-    for r in rows:
-        shared = toks & _tokens(r["description"])
+    for i in near:
+        description, cid, other = rows[i]
+        shared = toks & other
         if not shared:
             continue
-        weight = len(shared) / len(toks | _tokens(r["description"]))     # Jaccard overlap
+        weight = len(shared) / len(toks | other)             # Jaccard overlap
         if weight < 0.2:
             continue
-        cid = r["category_id"]
         score[cid] = score.get(cid, 0.0) + weight
         support[cid] = support.get(cid, 0) + 1
         if weight > example.get(cid, (0, ""))[0]:
-            example[cid] = (weight, r["description"])
+            example[cid] = (weight, description)
     total = sum(score.values())
     if not total:
         return None
@@ -134,11 +175,11 @@ def uncategorised_id(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT id FROM categories WHERE name = 'Uncategorised'").fetchone()[0]
 
 
-def classify(conn: sqlite3.Connection, txn_id: int) -> None:
+def classify(conn: sqlite3.Connection, txn_id: int, mem: "_Memory | None" = None) -> None:
     t = conn.execute(
         """SELECT t.*, a.kind AS account_kind FROM transactions t
            JOIN accounts a ON a.id = t.account_id WHERE t.id = ?""", (txn_id,)).fetchone()
-    rule = find_rule(conn, t["description_norm"], t["amount"], t["account_kind"])
+    rule = find_rule(conn, t["description_norm"], t["amount"], t["account_kind"], mem.rules if mem else None)
     kind = t["kind"]
     category_id = uncategorised_id(conn)
     status, confidence, basis, refund_by = "proposed", 0.0, "no match: needs your review", None
@@ -160,7 +201,7 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
                          + timedelta(days=rule["expects_refund_days"])).isoformat()
     else:
         habit = _habit(conn, t["description_norm"], t["amount"])
-        similar = None if habit else _similar_past(conn, t["description"])
+        similar = None if habit else _similar_past(conn, t["description"], mem)
         if habit:
             category_id, n = habit
             status, confidence = "approved", 0.97
@@ -170,7 +211,7 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
             confidence = round(score * 0.9, 2)
             basis = f"similar to {n} earlier approved payment(s)"
         else:
-            guess = _guess(conn, t["description"], t["amount"])
+            guess = _guess(conn, t["description"], t["amount"], mem)
             if guess:
                 category_id, share, n, example = guess
                 confidence = round(min(share, 0.85) * 0.6, 2)
@@ -199,22 +240,35 @@ def classify(conn: sqlite3.Connection, txn_id: int) -> None:
         (category_id, status, confidence, basis, kind, refund_by, counterparty, txn_id))
 
 
-def resuggest(conn: sqlite3.Connection) -> int:
+def memory(conn: sqlite3.Connection) -> "_Memory":
+    """Read what you have approved once, to give to classify() when many lines are suggested together."""
+    return _Memory(conn)
+
+
+def resuggest(conn: sqlite3.Connection, near: list[str] | None = None) -> int:
     """Run the suggestions again for lines still waiting for you, now that more of your choices are known.
 
-    Only lines nobody has approved or edited and that sit in a draft import are touched.
+    Only lines nobody has approved or edited and that sit in a draft import are touched. With `near` (the merchants you
+    just approved), only waiting lines that share a word with them are looked at, since no other line can change.
     """
-    ids = [r[0] for r in conn.execute(
-        """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id
+    rows = conn.execute(
+        """SELECT t.id, t.description FROM transactions t JOIN batches b ON b.id = t.batch_id
            WHERE t.category_status = 'proposed' AND b.status != 'committed'
              AND (t.category_id = (SELECT id FROM categories WHERE name = 'Uncategorised')
-                  OR t.proposal_basis LIKE 'best guess%' OR t.proposal_basis LIKE 'similar to%')""")]
-    before = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status='proposed' AND category_id = ?",
-                          (uncategorised_id(conn),)).fetchone()[0]
-    for tid in ids:
-        classify(conn, tid)
-    after = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status='proposed' AND category_id = ?",
-                         (uncategorised_id(conn),)).fetchone()[0]
+                  OR t.proposal_basis LIKE 'best guess%' OR t.proposal_basis LIKE 'similar to%')""").fetchall()
+    if near is not None:
+        wanted: set = set()
+        for d in near:
+            wanted |= _tokens(d)
+        rows = [r for r in rows if _tokens(r["description"]) & wanted]
+    ids = [r["id"] for r in rows]
+    unc = uncategorised_id(conn)
+    before = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status='proposed' AND category_id = ?", (unc,)).fetchone()[0]
+    if ids:
+        mem = _Memory(conn)
+        for tid in ids:
+            classify(conn, tid, mem)
+    after = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status='proposed' AND category_id = ?", (unc,)).fetchone()[0]
     return max(before - after, 0)
 
 
@@ -284,8 +338,9 @@ def preview_rule(conn: sqlite3.Connection, pattern: str) -> list[sqlite3.Row]:
 def apply_rules_to_proposed(conn: sqlite3.Connection) -> int:
     ids = [r[0] for r in conn.execute(
         "SELECT id FROM transactions WHERE category_status = 'proposed'")]
+    mem = _Memory(conn) if ids else None
     for tid in ids:
-        classify(conn, tid)
+        classify(conn, tid, mem)
     conn.commit()
     return len(ids)
 

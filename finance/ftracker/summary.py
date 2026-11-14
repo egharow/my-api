@@ -279,12 +279,12 @@ def income_lines(conn: sqlite3.Connection, source: str, months: list[str]):
     bank = _bank_months(conn)
     marks = ",".join("?" * len(months))
     rows = [dict(r) for r in conn.execute(
-        f"""SELECT t.txn_date, t.budget_month, t.description, t.amount AS spent, a.label AS account, c.name AS subcategory, t.category_status
+        f"""SELECT t.id, t.txn_date, t.budget_month, t.description, t.amount AS spent, a.label AS account, c.name AS subcategory, t.category_status
             FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id
             WHERE c.kind = 'income' AND c.name = ? AND t.amount > 0 AND t.budget_month IN ({marks})""", [source, *months]) if r["budget_month"] in bank]
     for e in conn.execute(f"SELECT month, label, actual FROM monthly_entries WHERE section = 'income' AND actual > 0 AND month IN ({marks})", months):
         if e["month"] not in bank and income_source_name(e["label"]) == source:
-            rows.append({"txn_date": f"{e['month']}-01", "budget_month": e["month"], "description": f"{e['label']} (from your old budget sheet)",
+            rows.append({"id": None, "txn_date": f"{e['month']}-01", "budget_month": e["month"], "description": f"{e['label']} (from your old budget sheet)",
                          "spent": e["actual"], "account": "Old budget sheet", "subcategory": source, "category_status": "approved"})
     rows.sort(key=lambda r: r["txn_date"], reverse=True)
     return rows

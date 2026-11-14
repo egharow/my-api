@@ -126,6 +126,7 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
 
     new = skipped = 0
     chosen = booking.basis(conn)
+    mem = categorize.memory(conn)             # read your history once for the whole statement
     for t in st.txns:
         if st.account_kind == "bank" and t.balance_after is not None and conn.execute(
                 "SELECT 1 FROM transactions WHERE account_id = ? AND txn_date = ? AND amount = ? AND balance_after = ?",
@@ -154,7 +155,7 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
         except sqlite3.IntegrityError:
             skipped += 1
             continue
-        categorize.classify(conn, cur.lastrowid)
+        categorize.classify(conn, cur.lastrowid, mem)
         new += 1
     return statement_id, new, skipped
 

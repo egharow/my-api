@@ -418,14 +418,50 @@ def _month_view(conn, ctx, d, m, owner, cats, back, base, q) -> str:
             f'<span class="n">vs. your {len(prior)}-month average</span></div>') if prior else ""
     total_vs = _vs(exp, usual_total)
     foot = f'<div class="cat foot"><span></span><span>Total</span><span class="hidem"></span><span class="n">{money(exp)}</span><span class="n">{total_vs}</span></div>'
-    inc_rows = "".join(f'<div class="srcrow"><span dir="auto">{esc(k)}</span><span class="n">{money(v)}</span></div>'
-                       for k, v in sorted(d["inc"].get(m, {}).items(), key=lambda kv: -kv[1]))
-    income = (f'<details class="card" style="margin-top:14px"><summary><b>Where the income came from</b> <span class="cap">{money(inc)}</span></summary>{inc_rows}</details>'
-              if inc_rows else "")
+    income = _income_section(conn, ctx, d, m, owner, cats, back, prior, inc)
     fixed = insights.fixed_costs(conn, m, d["months"], owner)
     odd = insights.unusual(conn, m, d["months"], owner, fixed)
     return (f'{note}{_tiles(inc, exp, inv)}{_confirm_band(conn, m)}{_pace(conn, ctx, d, m, owner)}<h3 style="margin:18px 0 6px;font-size:16px">Where it went</h3>'
-            f'<div class="cats">{head}{"".join(rows)}{foot}</div>{_budget_month(conn, ctx, spend, owner)}{_worth_a_look(ctx, odd, cats, back, m)}{_fixed_card(fixed, m)}{income}')
+            f'<div class="cats">{head}{"".join(rows)}{foot}</div>{income}{_budget_month(conn, ctx, spend, owner)}{_worth_a_look(ctx, odd, cats, back, m)}{_fixed_card(fixed, m)}')
+
+
+def _income_section(conn, ctx, d, m: str, owner, cats: str, back: str, prior: list[str], inc: float) -> str:
+    """Where the money coming in came from, the same way 'Where it went' shows spending: by source, with the lines behind each."""
+    by = d["inc"].get(m, {})
+    if not by:
+        return ""
+    usual = {k: sum(d["inc"].get(x, {}).get(k, 0.0) for x in prior) / len(prior) for k in {k for x in prior for k in d["inc"].get(x, {})}} if prior else {}
+    usual_total = sum(d["inc_tot"].get(x, 0.0) for x in prior) / len(prior) if prior else None
+    ranked = sorted(by.items(), key=lambda kv: -kv[1])
+    open_src = ""
+    rows = []
+    for src, v in ranked:
+        lines = summary.income_lines(conn, src, [m])
+        line_rows = "".join(
+            f'<div><span>{esc(l["txn_date"][8:10])}/{esc(l["txn_date"][5:7])}</span><span><bdi dir="auto">{esc(l["description"])}</bdi>'
+            f'<span class="cap"> · {esc(l["account"])}{" · ?" if l["category_status"] == "proposed" else ""}</span></span>'
+            f'<span class="n">{money(l["spent"], "ILS", 0)}</span><span>{_change_form(ctx, l.get("id"), cats, back, l["budget_month"])}</span></div>' for l in lines)
+        rows.append(f'<details class="cat"{" open" if open_src == src else ""}><summary><span class="tw">›</span><span dir="auto">{esc(src)}</span>'
+                    f'<span class="share hidem"><span class="t"><span style="width:{v / ranked[0][1] * 100:.0f}%"></span></span><em>{v / (inc or 1) * 100:.0f}%</em></span>'
+                    f'<span class="n">{money(v)}</span><span class="n">{_vs_income(v, usual.get(src, 0.0) if prior else None)}</span></summary>'
+                    f'<div class="lines">{line_rows or "<div><span></span><span class=cap>No lines to show.</span><span></span><span></span></div>"}</div></details>')
+    head = ('<div class="cat head"><span></span><span>Source</span><span class="hidem">Share of income</span><span class="n">Received</span>'
+            f'<span class="n">vs. your {len(prior)}-month average</span></div>') if prior else ""
+    foot = (f'<div class="cat foot"><span></span><span>Total</span><span class="hidem"></span><span class="n">{money(inc)}</span>'
+            f'<span class="n">{_vs_income(inc, usual_total)}</span></div>')
+    return f'<h3 style="margin:18px 0 6px;font-size:16px">Where the income came from</h3><div class="cats">{head}{"".join(rows)}{foot}</div>'
+
+
+def _vs_income(value: float, usual: float | None) -> str:
+    """Like the spending comparison, but more is good news: green when above usual, red when below."""
+    if usual is None:
+        return ""
+    if usual <= 0:
+        return '<span class="down">new</span>' if value > 0 else ""
+    diff = value - usual
+    if abs(diff) < max(usual * 0.03, 1):
+        return '<span class="cap">≈ usual</span>'
+    return f'<span class="{"down" if diff > 0 else "up"}">{"▲" if diff > 0 else "▼"} {money(abs(diff))}</span>'
 
 
 def _confirm_band(conn, m: str) -> str:

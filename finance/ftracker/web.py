@@ -389,12 +389,13 @@ class App:
         return _html(200, views_setup.history_preview_page(conn, ctx, sheet_import.parse_workbook(path), token))
 
     @staticmethod
-    def _auto_pass(conn) -> int:
-        """Re-suggest the waiting lines now that you approved more; returns how many became approved by themselves."""
+    def _auto_pass(conn, near: list[str] | None = None) -> int:
+        """Re-suggest the waiting lines now that you approved more; returns how many became approved by themselves.
+        With `near`, only the waiting lines that resemble what you just approved are looked at, so a click stays fast."""
         def n():
             return conn.execute("SELECT COUNT(*) FROM transactions WHERE category_status = 'approved' AND proposal_basis LIKE 'approved by itself%'").fetchone()[0]
         before = n()
-        categorize.resuggest(conn)
+        categorize.resuggest(conn, near)
         conn.commit()
         return n() - before
 
@@ -433,6 +434,7 @@ class App:
                 chosen = form.get("category", "")
                 learn = form.get("learn") == "1"
                 done = skipped = 0
+                near: list[str] = []
                 for key, cat in picks:
                     target = chosen or cat
                     if target == "Uncategorised":
@@ -442,8 +444,9 @@ class App:
                         """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id JOIN categories c ON c.id = t.category_id
                            WHERE t.category_status = 'proposed' AND t.description_norm = ? AND c.name = ? AND b.status != 'committed'""", (key, cat))]
                     if ids:
+                        near += [r[0] for r in conn.execute(f"SELECT DISTINCT description FROM transactions WHERE id IN ({','.join('?' * len(ids))})", ids)]
                         done += categorize.approve(conn, ids, target, learn=learn, actor=who)
-                auto = self._auto_pass(conn)
+                auto = self._auto_pass(conn, near)
                 msg = f"{done} line(s) approved from {len(picks) - skipped} merchant(s)" + (" and remembered" if learn else "")
                 if skipped:
                     msg += f". {skipped} had no suggestion: pick a category for them"
@@ -501,8 +504,9 @@ class App:
                 ids = [r[0] for r in conn.execute(
                     """SELECT t.id FROM transactions t JOIN batches b ON b.id = t.batch_id
                        WHERE t.category_status = 'proposed' AND t.description_norm = ? AND b.status != 'committed'""", (form["key"],))]
+                near = [r[0] for r in conn.execute(f"SELECT DISTINCT description FROM transactions WHERE id IN ({','.join('?' * len(ids))})", ids)] if ids else []
                 n = categorize.approve(conn, ids, form["category"], learn=form.get("learn") == "1", actor=who)
-                auto = self._auto_pass(conn)
+                auto = self._auto_pass(conn, near)
                 return self._redirect("/review", f"{n} line(s) set to {form['category']}" + (" and remembered" if form.get("learn") == "1" else "")
                                       + (f". {auto} more approved by themselves" if auto else ""))
             m = path.split("/")
