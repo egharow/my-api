@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from . import categorize, reconcile
+from . import categorize, reconcile, splits
 from . import discrepancies as dx
 from .archive import plan_path
 from . import booking
@@ -127,10 +127,11 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
     new = skipped = 0
     chosen = booking.basis(conn)
     mem = categorize.memory(conn)             # read your history once for the whole statement
+    split_rules = splits.rules(conn)
     for t in st.txns:
         if st.account_kind == "bank" and t.balance_after is not None and conn.execute(
-                "SELECT 1 FROM transactions WHERE account_id = ? AND txn_date = ? AND amount = ? AND balance_after = ?",
-                (account_id, t.txn_date.isoformat(), t.amount, t.balance_after)).fetchone():
+                "SELECT 1 FROM transactions WHERE account_id = ? AND txn_date = ? AND (amount = ? OR split_total = ?) AND balance_after = ?",
+                (account_id, t.txn_date.isoformat(), t.amount, t.amount, t.balance_after)).fetchone():
             skipped += 1                      # the same line read from another statement (the wording can differ a little)
             continue
         key = _dedupe_key(account_id, st.account_kind, t, st.billing_date)
@@ -156,6 +157,8 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
             skipped += 1
             continue
         categorize.classify(conn, cur.lastrowid, mem)
+        if split_rules:
+            splits.apply_to_line(conn, cur.lastrowid, split_rules)          # a bill that is two things is counted as two
         new += 1
     return statement_id, new, skipped
 

@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, servermode, driveserver
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, splits, servermode, driveserver
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -629,6 +629,33 @@ class App:
                         changed += 1 if categorize.set_treatment(conn, int(key[2:]), val) else 0
                 conn.commit()
                 return self._redirect("/setup", f"{changed} categor{'y' if changed == 1 else 'ies'} changed. Your totals now follow." if changed else "Nothing changed.")
+            if path == "/setup/split/add":
+                splits.add_rule(conn, form.get("pattern", ""), float(form.get("amount", "0").replace(",", "") or 0), form.get("fixed_cat", ""), form.get("rest_cat", ""))
+                done = splits.apply_to_all(conn)
+                conn.commit()
+                return self._redirect("/setup", f"Rule saved. {done['split']} payment(s) split into two parts" + (f", {done['whole']} counted whole" if done["whole"] else "") + ".")
+            if path == "/setup/split/delete":
+                splits.delete_rule(conn, int(form.get("id", 0)))
+                conn.commit()
+                return self._redirect("/setup", "Rule deleted. Payments already split stay split; undo one from the Transactions page.")
+            if path == "/setup/category/new":
+                categorize.add_category(conn, form.get("name", ""), form.get("treatment", "spending"))
+                conn.commit()
+                return self._redirect("/setup", f"Category “{form.get('name', '').strip()}” added.")
+            if path == "/line/split":
+                back = form.get("back", "/")
+                if not back.startswith("/") or back.startswith("//") or "\n" in back or "://" in back:
+                    back = "/"
+                splits.split_line(conn, int(form["id"]), float((form.get("first") or "0").replace(",", "") or 0), form.get("cat1", ""), form.get("cat2", ""), who)
+                conn.commit()
+                return self._redirect(back, "Split into two parts.")
+            if path == "/line/unsplit":
+                back = form.get("back", "/")
+                if not back.startswith("/") or back.startswith("//") or "\n" in back or "://" in back:
+                    back = "/"
+                ok = splits.unsplit(conn, int(form["id"]), who)
+                conn.commit()
+                return self._redirect(back, "Back to one payment, waiting for a category." if ok else "That payment is not split.", err=not ok)
             if path == "/setup/category/rename":
                 categorize.rename_category(conn, form["old"], form.get("new", ""))
                 return self._redirect("/setup", f"Renamed to “{form['new'].strip()}”")
@@ -828,7 +855,7 @@ class App:
                 shown = [int(x) for x in multi.get("shown", []) if x.isdigit()]
                 balances.set_in_wealth(conn, shown, {a for a in shown if form.get(f"inc_{a}") == "1"})
                 return self._redirect("/wealth", "Saved. Net worth now counts only the accounts you ticked.")
-            if path in ("/line/category", "/line/leaveout") and form.get("id", "").isdigit() and not form.get("ok_closed"):
+            if path in ("/line/category", "/line/leaveout", "/line/split", "/line/unsplit") and form.get("id", "").isdigit() and not form.get("ok_closed"):
                 row = conn.execute("SELECT budget_month FROM transactions WHERE id = ?", (int(form["id"]),)).fetchone()
                 if row and closing.is_closed(conn, row[0]):
                     return self._redirect("/", f"{row[0]} is closed. Reopen it first, or tick “this month is closed” on the payment.", err=True)

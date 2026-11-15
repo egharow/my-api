@@ -5,7 +5,7 @@ from html import escape as esc
 from urllib.parse import urlencode
 
 from .charts import money
-from .views import Ctx, dmy, layout
+from .views import Ctx, _form, dmy, layout
 from .views_overview import _cat_options, _change_form, month_label
 
 PAGE = 200
@@ -68,7 +68,7 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
         else:
             where.append("(t.description LIKE ? OR t.detail LIKE ?)"); args += [like, like]
     sql = ("""SELECT t.id, t.txn_date, t.budget_month, t.description, t.detail, t.amount, t.currency, t.category_status, t.left_out,
-                     t.instalment_no, t.instalment_total, t.check_state, t.check_reason, c.name AS cat, a.label AS account
+                     t.instalment_no, t.instalment_total, t.check_state, t.check_reason, t.split_of, t.split_total, c.name AS cat, a.label AS account
               FROM transactions t JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id"""
            + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY t.txn_date DESC, t.id DESC LIMIT ?")
     rows = conn.execute(sql, args + [limit + 1]).fetchall()
@@ -134,6 +134,10 @@ def _line(ctx: Ctx, r, cat_opts: str, back: str) -> str:
         note.append(f'instalment {r["instalment_no"]} of {r["instalment_total"]}')
     if r["budget_month"] != r["txn_date"][:7]:
         note.append(f'counted in {month_label(r["budget_month"])}')
+    if r["split_total"] is not None:
+        note.append(f'split: first part of a ₪{abs(r["split_total"]):,.2f} payment')
+    elif r["split_of"]:
+        note.append("split: the rest of the payment above")
     if r["check_state"] == "ok":
         note.append("✓ checked")
     elif r["check_state"] == "question":
@@ -147,6 +151,14 @@ def _line(ctx: Ctx, r, cat_opts: str, back: str) -> str:
         cat_html = f'<span class="{"" if ok else "gchip"}" dir="auto">{esc(cat)}</span>'
     amt_cls = "mono r " + ("good" if r["amount"] > 0 else "")
     change = _change_form(ctx, r["id"], cat_opts, back, r["budget_month"]) if not ctx.readonly else ""
+    if not ctx.readonly:
+        hid = f'<input type="hidden" name="id" value="{r["id"]}"><input type="hidden" name="back" value="{esc(back)}">'
+        if r["split_of"] or r["split_total"] is not None:
+            change += _form(ctx, "/line/unsplit", hid + '<button class="quiet" title="Make it one payment again">Undo the split</button>', "row")
+        elif r["amount"] < 0:
+            change += ('<details class="chg"><summary>split into two categories</summary>'
+                       + _form(ctx, "/line/split", hid + f'First part ₪ <input name="first" inputmode="decimal" size="9" required> is <select name="cat1" required>{cat_opts}</select> '
+                               f'and the rest is <select name="cat2" required>{cat_opts}</select> <button class="quiet">Split</button>', "row") + "</details>")
     return (f'<details class="trow{" lo" if r["left_out"] else ""}"><summary>'
             f'<i class="mk {"ok" if ok else "guess"}" aria-label="{"Confirmed" if ok else "Guessed"}"></i>'
             f'<span class="mer"><bdi dir="auto">{esc(r["description"])}</bdi>' + (f'<span class="cap">{" · ".join(note)}</span>' if note else "") + "</span>"

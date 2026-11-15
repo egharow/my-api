@@ -520,3 +520,17 @@ def repair_transfer_kinds(conn: sqlite3.Connection) -> int:
         reconcile.resolve_stale(conn)
     conn.commit()
     return n
+
+
+def add_category(conn: sqlite3.Connection, name: str, treatment: str = "spending") -> None:
+    """A category of your own, for example Water or Arnona. `treatment` is how it counts (see TREATMENTS)."""
+    name = name.strip()
+    if not name or len(name) > 60:
+        raise ValueError("Type a name for the category.")
+    if conn.execute("SELECT 1 FROM categories WHERE lower(name) = lower(?)", (name,)).fetchone():
+        raise ValueError(f"There is already a category called “{name}”.")
+    if treatment not in TREATMENTS:
+        raise ValueError("unknown choice")
+    kind, neutral = {"spending": ("expense", 0), "left_out": ("transfer", 1), "saving": ("saving", 1), "income": ("income", 0)}[treatment]
+    conn.execute("INSERT INTO categories (name, parent_id, kind, neutral) VALUES (?, NULL, ?, ?)", (name, kind, neutral))
+    audit(conn, "category_added", "category", None, name)

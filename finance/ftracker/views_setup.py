@@ -215,6 +215,28 @@ def setup_page(conn: sqlite3.Connection, ctx: Ctx) -> str:
                      charts.scroll(f'<table><thead><tr><th>Category</th><th>How it counts</th><th class="n">Lines</th></tr></thead><tbody>{treat_rows}</tbody></table>')
                      + '<p><button>Save</button></p>') + "</section>")
     out.append(treat)
+    from . import splits
+    all_cats = [c["name"] for c in cc if c["name"] != "Uncategorised"]
+    cat_opts = "".join(f"<option>{esc(n)}</option>" for n in all_cats)
+    def rule_row(r) -> str:
+        gone = _form(ctx, "/setup/split/delete", '<input type="hidden" name="id" value="' + str(r["id"]) + '"><button class="quiet">Delete</button>', "inline")
+        return (f'<tr><td dir="auto">{esc(r["pattern"])}</td><td class="n">₪{r["fixed_amount"]:,.2f}</td><td dir="auto">{esc(r["fixed_cat"])}</td>'
+                f'<td dir="auto">{esc(r["rest_cat"])}</td><td>{gone}</td></tr>')
+    rules_rows = "".join(rule_row(r) for r in splits.rules(conn))
+    out.append('<section class="card" style="margin-top:12px"><h2>Bills that are two things</h2>'
+               '<p class="muted">Some payments cover two categories, for example a municipal bill: property tax plus water. Say how to split it: the words on the payment, '
+               'the fixed amount for the first part, and where the rest goes. Every matching payment, past and future, is counted in two parts that add up to the payment. '
+               'A payment of exactly the fixed amount goes whole to the first category; a smaller one is left alone.</p>'
+               + (f'<table><thead><tr><th>Words on the payment</th><th class="n">Fixed part</th><th>Fixed part is</th><th>The rest is</th><th></th></tr></thead><tbody>{rules_rows}</tbody></table>' if rules_rows else "")
+               + _form(ctx, "/setup/split/add",
+                       '<input name="pattern" placeholder="Words on the payment" required> <input name="amount" inputmode="decimal" placeholder="Fixed amount" size="9" required> '
+                       f'the fixed part is <select name="fixed_cat">{cat_opts}</select> and the rest is <select name="rest_cat">{cat_opts}</select> '
+                       '<button>Add and apply to past payments</button>', "row")
+               + '<h3 style="margin:16px 0 4px;font-size:15px">A new category</h3>'
+               + _form(ctx, "/setup/category/new",
+                       '<input name="name" placeholder="Category name, for example Water" required> <select name="treatment">'
+                       + "".join(f'<option value="{k}">{esc(v)}</option>' for k, v in categorize.TREATMENTS.items()) + '</select> <button class="quiet">Add category</button>', "row")
+               + "</section>")
     out.append('<section class="card" style="margin-top:12px"><h2>Categories</h2><p class="muted">Merge a category into another (all its lines and rules move), '
                'or rename one. Use this to tidy names from your old sheet.</p>'
                + _form(ctx, "/setup/category/merge", f"Merge {pick('src', True)} into {pick('dst')} <button>Merge</button>", "row")
