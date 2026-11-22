@@ -3,7 +3,7 @@ import json
 import sqlite3
 from datetime import date, timedelta
 
-from . import budgets, expected, reconcile, recurring, summary
+from . import budgets, expected, reconcile, recurring, regulars, summary
 from .charts import money
 
 KEY = "alerts_dismissed"
@@ -51,6 +51,20 @@ def build(conn: sqlite3.Connection, today: str, include_dismissed: bool = False)
             if 0 <= (due - now_d).days <= 30:
                 out.append({"id": f'renew:{i["key"]}:{i["next"]}', "severity": "info", "title": f'{i["name"]} renews soon',
                             "detail": f'About {money(i["usual"])} around {i["next"]}.', "link": "/recurring"})
+    # things you said should come every month: missing, or different from usual
+    for e in regulars.evaluate(conn, today):
+        it, mo = e["item"], e["month"]
+        word_in = it["direction"] == "in"
+        if e["status"] == "missing":
+            out.append({"id": f'reg:{it["id"]}:{mo}:missing', "severity": "warning",
+                        "title": f'{it["name"]} {"has not arrived" if word_in else "has not been paid"} ({mo})',
+                        "detail": f'You expect about {money(e["usual"], "ILS", 2) if e["usual"] else "an amount"} each month' + (f', usually around the {e["day"]}th.' if e["day"] else "."),
+                        "link": "/recurring#expected"})
+        elif e["status"] == "different":
+            out.append({"id": f'reg:{it["id"]}:{mo}:diff:{e["this"]:.0f}', "severity": "warning",
+                        "title": f'{it["name"]} is different this time ({mo})',
+                        "detail": f'{"It came" if word_in else "It was"} {money(e["this"], "ILS", 2)}, usually {money(e["usual"], "ILS", 2)} ({e["diff"]:+,.2f}).',
+                        "link": "/recurring#expected"})
     # the same payment twice within a few days
     for r in conn.execute(
             """SELECT a.id AS a_id, b.id AS b_id, a.txn_date AS d1, b.txn_date AS d2, a.description AS d, -a.amount AS spent

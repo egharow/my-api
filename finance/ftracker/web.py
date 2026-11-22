@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, splits, servermode, driveserver
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, splits, regulars, servermode, driveserver
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -629,6 +629,20 @@ class App:
                         changed += 1 if categorize.set_treatment(conn, int(key[2:]), val) else 0
                 conn.commit()
                 return self._redirect("/setup", f"{changed} categor{'y' if changed == 1 else 'ies'} changed. Your totals now follow." if changed else "Nothing changed.")
+            if path == "/regular/add":
+                raw = (form.get("amount") or "").replace(",", "").strip()
+                try:
+                    amount = float(raw) if raw else None
+                    tol = float((form.get("tolerance") or "8").replace(",", "")) / 100
+                except ValueError:
+                    raise ValueError("The amount and the allowed difference must be numbers.")
+                regulars.add(conn, form.get("name", ""), form.get("pattern", ""), form.get("direction", ""), amount, tol)
+                conn.commit()
+                return self._redirect("/recurring#expected", f"Now tracking “{form.get('name', '').strip()}”.")
+            if path == "/regular/remove":
+                regulars.remove(conn, int(form.get("id", 0)))
+                conn.commit()
+                return self._redirect("/recurring#expected", "Stopped tracking it.")
             if path == "/setup/split/add":
                 splits.add_rule(conn, form.get("pattern", ""), float(form.get("amount", "0").replace(",", "") or 0), form.get("fixed_cat", ""), form.get("rest_cat", ""))
                 done = splits.apply_to_all(conn)

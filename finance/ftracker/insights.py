@@ -76,6 +76,35 @@ def fixed_costs(conn: sqlite3.Connection, month: str, data_months: list[str], ow
     return sorted(out, key=lambda o: -o["usual"])[:14]
 
 
+def fixed_income(conn: sqlite3.Connection, month: str, data_months: list[str], owner: str | None = None) -> list[dict]:
+    """Money that comes in every month at about the same amount, such as a child allowance."""
+    win = _window(conn, month, data_months)
+    if len(win) < MIN_MONTHS:
+        return []
+    where = ["c.kind = 'income'", "t.amount > 0", "t.currency = 'ILS'", "t.left_out = 0", f"t.budget_month IN ({','.join('?' * len(win))})"]
+    args: list = list(win)
+    if owner:
+        where.append("o.name = ?")
+        args.append(owner)
+    by: dict[str, dict] = {}
+    for r in conn.execute(
+            f"""SELECT t.description, t.budget_month AS m, t.amount AS amt FROM transactions t JOIN categories c ON c.id = t.category_id
+                JOIN accounts a ON a.id = t.account_id LEFT JOIN owners o ON o.id = a.owner_id WHERE {' AND '.join(where)}""", args):
+        key = merchant_key(r["description"]) or r["description"]
+        d = by.setdefault(key, {"name": r["description"], "months": {}})
+        d["months"][r["m"]] = d["months"].get(r["m"], 0) + r["amt"]
+    out = []
+    for d in by.values():
+        amounts = list(d["months"].values())
+        if len(amounts) < MIN_MONTHS:
+            continue
+        usual = median(amounts)
+        if usual < 30 or max(abs(a - usual) for a in amounts) > usual * MAX_SPREAD:
+            continue
+        out.append({"name": d["name"], "usual": round(usual, 2), "this": d["months"].get(month), "months": len(amounts)})
+    return sorted(out, key=lambda o: -o["usual"])
+
+
 def unusual(conn: sqlite3.Connection, month: str, data_months: list[str], owner: str | None = None, fixed: list[dict] | None = None) -> list[dict]:
     """Payments this month that stand out: very large, far above that category's usual line, or from a merchant you've never paid."""
     prior = [m for m in data_months if m < month][-12:]

@@ -252,7 +252,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     head = f'<div class="pagehead"><h1>Overview</h1>{"" if ctx.readonly else IMPORT_BUTTON}</div>{notice}{controls}{importer_ui}'
     if mode != "month":
         return layout(conn, ctx, "/", "Overview", f"{head}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
-    side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
+    side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _expected_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
     return layout(conn, ctx, "/", "Overview", f'{head}{_dataline(conn, ctx.today)}<div class="ov"><div class="ovmain">{body}</div><aside class="ovside">{side}</aside></div>')
 
 
@@ -263,6 +263,20 @@ def _import_box(ctx) -> str:
     """Drop files right here on the home page. They are read the same way as on the Add statements page."""
     from .views_setup import dropzone
     return dropzone(ctx, compact=True)
+
+
+def _expected_card(conn, ctx) -> str:
+    """The things you expect every month, this month: arrived, different, missing."""
+    if ctx.readonly:
+        return ""
+    from . import regulars
+    from .views_recurring import STATUS
+    rows = [e for e in regulars.evaluate(conn, ctx.today) if e["month"] == ctx.today[:7]]
+    if not rows:
+        return ('<a class="card sidecard" href="/recurring#expected" style="display:block;color:inherit;text-decoration:none"><h4>Expected every month</h4>'
+                '<p class="cap" style="margin:0">Track things that should come every month, like child allowance, and get flagged when one is missing or different.</p></a>')
+    body = "".join(f'<div class="strow"><span dir="auto">{esc(e["item"]["name"])}</span><span>{STATUS[e["status"]][0]}</span></div>' for e in rows)
+    return f'<section class="card sidecard"><h4>Expected this month</h4>{body}<p class="cap" style="margin:8px 0 0"><a href="/recurring#expected">Manage</a></p></section>'
 
 
 def _statements_card(conn, ctx, m: str) -> str:
