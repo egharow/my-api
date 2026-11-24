@@ -991,7 +991,8 @@ class App:
                 if not cardfetch.setup_status()["ready"]:
                     return self._redirect("/cards", "Finish the setup steps on this page first.", err=True)
                 only = [form["only"]] if form.get("only") else None
-                ok = cardfetch.JOB.start_fetch(self.home, connect, date.fromisoformat(self._today()), form.get("pin") or None, only, hooks)
+                ok = cardfetch.JOB.start_fetch(self.home, connect, date.fromisoformat(self._today()), form.get("pin") or None, only, hooks,
+                                               show_browser=form.get("show") == "1")
                 if not ok:
                     return self._redirect("/cards", "A fetch is already running, or no login is saved yet.", err=True)
                 return self._redirect("/cards#job", "Fetching your cards. This page shows each one as it finishes.")

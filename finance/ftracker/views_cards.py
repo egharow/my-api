@@ -60,13 +60,17 @@ def _logins_card(ctx: Ctx, logins: list, status: dict, ready: bool, busy: bool, 
                 if s else '<span class="muted">never fetched</span>')
         acts = (_form(ctx, "/cards/fetch", f'<input type="hidden" name="only" value="{esc(e["id"])}">{pin_in}'
                       f'<button class="quiet"{"" if ready and not busy else " disabled"}>Fetch only this</button>', "inline")
+                + " " + _form(ctx, "/cards/fetch", f'<input type="hidden" name="only" value="{esc(e["id"])}"><input type="hidden" name="show" value="1">{pin_in}'
+                              f'<button class="quiet" title="Opens the card site in a window so you can watch, and type an SMS code if it asks"'
+                              f'{"" if ready and not busy else " disabled"}>Fetch with the window open</button>', "inline")
                 + f' <a class="btnlink quiet" href="/cards?edit={esc(e["id"])}#add">Change</a> '
                 + _form(ctx, "/cards/forget", f'<input type="hidden" name="id" value="{esc(e["id"])}"><button class="quiet">Forget</button>', "inline"))
         rows += (f'<tr><td><b>{esc(cardfetch.COMPANIES.get(e["company"], {}).get("name", e["company"]))}</b></td><td>{esc(e["person"])}</td>'
                  f'<td>{esc(e.get("saved_at", ""))}</td><td>{last}</td><td>{acts}</td></tr>')
     fetch_all = _form(ctx, "/cards/fetch", f'{pin_in}<button{"" if ready and not busy else " disabled"}>Fetch all cards now</button>', "inline")
     return ('<section class="card" style="margin-bottom:12px" id="fetch"><h2>Saved logins</h2>'
-            '<p class="muted">Only which company and whose login are shown. The details themselves are never shown again, not even to you.</p>'
+            '<p class="muted">Only which company and whose login are shown. The details themselves are never shown again, not even to you. '
+            'If a company fails, try <b>Fetch with the window open</b>: you watch the site log in, which also shows where it gets stuck.</p>'
             + charts.scroll('<table><thead><tr><th>Card company</th><th>Whose</th><th>Saved</th><th>Last fetch</th><th></th></tr></thead>'
                             f'<tbody>{rows}</tbody></table>') + f'<p>{fetch_all}</p></section>')
 

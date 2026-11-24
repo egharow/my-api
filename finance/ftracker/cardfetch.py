@@ -233,7 +233,21 @@ def explain(result: dict) -> str:
     kind = result.get("errorType") or ""
     if kind == "SETUP":
         return "Card fetching is not set up yet (see the steps on this page)."
-    return ERRORS.get(kind, GENERIC)
+    text = ERRORS.get(kind, GENERIC)
+    detail = " ".join(str(result.get("errorMessage") or "").split())[:240]
+    if kind not in ("INVALID_PASSWORD", "CHANGE_PASSWORD", "ACCOUNT_BLOCKED"):
+        text += f" Details: {kind or 'unknown'}" + (f": {detail}" if detail else "")
+    return text
+
+
+def scrub(result: dict, creds: dict | None) -> dict:
+    """Make sure no part of a login can end up in a message shown or saved (sites sometimes echo what was typed)."""
+    msg = str(result.get("errorMessage") or "")
+    for v in (creds or {}).values():
+        v = str(v)
+        if len(v) >= 3:
+            msg = msg.replace(v, "•••")
+    return {**result, "errorMessage": msg}
 
 
 def _status_path() -> Path:
@@ -328,7 +342,8 @@ class Job:
         threading.Thread(target=work, daemon=True).start()
         return True
 
-    def start_fetch(self, home, connect, today: date, pin: str | None, only: list[str] | None = None, hooks=None) -> bool:
+    def start_fetch(self, home, connect, today: date, pin: str | None, only: list[str] | None = None, hooks=None,
+                    show_browser: bool = False) -> bool:
         vault.check_pin(pin)                                # a wrong PIN is told at once, not after a minute
         logins = [e for e in vault.list_logins() if not only or e["id"] in only]
         if not logins or not self._begin("fetch"):
@@ -344,7 +359,7 @@ class Job:
                     self.step = f"fetching {name}"
                     try:
                         creds = vault.load_login(e["id"], pin)
-                        res = run_scraper(e["company"], creds, start_date_for(e["id"], today))
+                        res = scrub(run_scraper(e["company"], creds, start_date_for(e["id"], today), show_browser), creds)
                     except vault.VaultError as exc:
                         res = {"ok": False, "errorType": "VAULT", "errorMessage": str(exc)}
                     finally:

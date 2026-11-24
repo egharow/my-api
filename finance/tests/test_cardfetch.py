@@ -322,3 +322,11 @@ def test_a_fetch_shows_pending_on_overview_and_transactions(app, conn, monkeypat
     assert "Pending on cards" in ov and "CAFE WAITING" in ov
     tx = text(get(app, "/transactions"))
     assert 'id="pending"' in tx and "not counted" in tx
+
+
+def test_failure_shows_the_real_reason_but_never_the_login():
+    res = cardfetch.scrub({"ok": False, "errorType": "GENERIC", "errorMessage": f"login failed for 458011 at form\n step 3"},
+                          {"id": "123456789", "card6Digits": "458011", "password": SECRET})
+    msg = cardfetch.explain(res)
+    assert "Details: GENERIC: login failed for ••• at form step 3" in msg and "458011" not in msg
+    assert "Details" not in cardfetch.explain({"errorType": "INVALID_PASSWORD", "errorMessage": "x"})
