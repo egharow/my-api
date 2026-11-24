@@ -282,3 +282,43 @@ def test_kit_is_pinned_with_hashes_and_no_install_scripts():
     entries = [v for k, v in lock["packages"].items() if k]
     assert entries and all(v.get("integrity", "").startswith("sha512-") for v in entries)
     assert all(v.get("resolved", "").startswith("https://registry.npmjs.org/") for v in entries)
+
+
+# ---- pending charges ------------------------------------------------------------------------------------------------
+
+def test_pending_charges_are_shown_apart_and_replaced_by_the_next_fetch(home, conn):
+    from ftracker import pending, summary
+    res = fetched([site_txn("2026-10-03", "SUPER", -100.0, "1", billed="2026-11-02"),
+                   site_txn("2026-10-04", "CAFE WAITING", -42.0, None, status="pending"),
+                   {**site_txn("2026-10-04", "SHOP ABROAD", -9.0, None, status="pending"), "chargedCurrency": "USD"}])
+    _drop(home, "max", res)
+    importer.import_inbox(home, conn, date(2026, 10, 5))
+    assert pending.replace(conn, "max:Ely", "max", res["accounts"], "2026-10-05T09:00:00") == 2
+    rows = pending.current(conn, "2026-10-05")
+    assert {r["description"] for r in rows} == {"CAFE WAITING", "SHOP ABROAD"} and pending.total(rows) == 42.0
+    assert rows[0]["account"] == "Max 1234"
+    assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 1          # pending never becomes a counted line
+    # next fetch: the café is final now, the shop is still pending
+    later = fetched([site_txn("2026-10-04", "CAFE WAITING", -42.0, "2", billed="2026-11-02"),
+                     {**site_txn("2026-10-04", "SHOP ABROAD", -9.0, None, status="pending"), "chargedCurrency": "USD"}])
+    assert pending.replace(conn, "max:Ely", "max", later["accounts"], "2026-10-07T09:00:00") == 1
+    assert [r["description"] for r in pending.current(conn, "2026-10-07")] == ["SHOP ABROAD"]
+    assert pending.current(conn, "2026-10-30") == []                                       # not seen for two weeks: dropped
+
+
+def test_a_fetch_shows_pending_on_overview_and_transactions(app, conn, monkeypatch):
+    vault.save_login("max", "Ely", {"username": "u", "password": "p"})
+    monkeypatch.setattr(cardfetch, "run_scraper", lambda *a, **k: fetched([
+        site_txn("2026-09-03", "SUPER", -100.0, "1"), site_txn("2026-10-04", "CAFE WAITING", -42.0, None, status="pending")]))
+    monkeypatch.setattr(cardfetch, "setup_status", lambda: {"ready": True})
+    post(app, "/cards/fetch", {})
+    for _ in range(100):
+        if not cardfetch.JOB.snapshot()["running"]:
+            break
+        time.sleep(0.05)
+    job = cardfetch.JOB.snapshot()
+    assert "1 pending" in job["summary"] and "1 line(s) read" in job["results"][0]["message"]
+    ov = text(get(app, "/"))
+    assert "Pending on cards" in ov and "CAFE WAITING" in ov
+    tx = text(get(app, "/transactions"))
+    assert 'id="pending"' in tx and "not counted" in tx

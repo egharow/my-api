@@ -337,6 +337,7 @@ class Job:
         def work():
             _enter(hooks)
             files: dict[str, str] = {}
+            waiting: list[tuple] = []                       # (login id, company, accounts, when): pending charges to show
             try:
                 for e in logins:
                     name = f"{COMPANIES.get(e['company'], {}).get('name', e['company'])} ({e['person']})"
@@ -350,8 +351,9 @@ class Job:
                         creds = None
                     now = datetime.now()
                     if res.get("ok"):
+                        waiting.append((e["id"], e["company"], res.get("accounts") or [], now.isoformat(timespec="seconds")))
                         f = write_fetch_file(home.inbox, e["company"], e["person"], res, now)
-                        n = sum(len(a.get("txns") or []) for a in res.get("accounts") or [])
+                        n = sum(1 for a in res.get("accounts") or [] for t in a.get("txns") or [] if (t.get("status") or "completed") == "completed")
                         row = {"id": e["id"], "name": name, "ok": True, "message": f"{n} line(s) read from the site" if f else "nothing new on the site"}
                         if f:
                             files[f.name] = e["id"]
@@ -378,8 +380,22 @@ class Job:
                                     imported += fr.new_txns
                                 elif fr.status == "unrecognised":
                                     row["ok"], row["message"] = False, "Fetched, but the result could not be imported: " + fr.detail
+                pend = 0
+                if waiting:
+                    from . import pending
+                    conn = connect(home.db_path)
+                    try:
+                        for lid, company, accts, when in waiting:
+                            n = pending.replace(conn, lid, company, accts, when)
+                            pend += n
+                            for row in self.results:
+                                if row.get("id") == lid and n:
+                                    row["message"] += f"; {n} pending (shown, not counted yet)"
+                        conn.commit()
+                    finally:
+                        conn.close()
                 bad = sum(1 for r in self.results if not r["ok"])
-                self._end(f"{imported} new line(s) brought in" + (f"; {bad} card company(ies) did not work" if bad else "")
+                self._end(f"{imported} new line(s) brought in" + (f", {pend} pending charge(s) shown but not counted yet" if pend else "") + (f"; {bad} card company(ies) did not work" if bad else "")
                           + (". New lines are waiting in Review." if imported else "."))
             except Exception as exc:
                 self._end(f"The fetch stopped: {exc}")

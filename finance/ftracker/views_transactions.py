@@ -122,7 +122,27 @@ def transactions_page(conn: sqlite3.Connection, ctx: Ctx, q: dict) -> str:
     head = '<div class="pagehead"><h1>Transactions</h1></div>'
     table = ('<div class="tbl"><div class="thead"><span></span><span>Merchant</span><span>Category</span><span>Account</span><span class="r">Amount</span></div>'
              + "".join(body) + "</div>")
-    return layout(conn, ctx, "/transactions", "Transactions", f"{head}{form}{summ}{table}")
+    return layout(conn, ctx, "/transactions", "Transactions", f"{head}{form}{summ}{_pending_section(conn, ctx)}{table}")
+
+
+def _pending_section(conn: sqlite3.Connection, ctx: Ctx) -> str:
+    """Card charges not final yet (from the last Fetch cards). Listed apart and never counted."""
+    from . import pending
+    try:
+        rows = pending.current(conn, ctx.today)
+    except sqlite3.Error:
+        return ""
+    if not rows:
+        return ""
+    lines = "".join(
+        f'<div class="trow pend"><span class="cap">{esc(_day_label(r["txn_date"]))}</span><span dir="auto">{esc(r["description"])}</span>'
+        f'<span class="cap">{esc(r["account"] or "")}</span><span class="mono r">{_signed(r["amount"], r["currency"])}</span></div>' for r in rows)
+    when = max(r["fetched_at"] for r in rows)[:16].replace("T", " ")
+    return (f'<details class="card" id="pending" style="margin-bottom:12px" open><summary><b>Pending on cards</b> · {len(rows)} charge(s) · '
+            f'<span class="mono">{_signed(-pending.total(rows), "ILS")}</span> <span class="cap" style="display:inline">not final yet, not counted · as of {esc(when)}</span></summary>'
+            '<style>.pend{display:grid;grid-template-columns:150px 1fr 160px 120px;gap:8px;padding:6px 0;border-top:1px solid var(--grid)}'
+            '.pend .r{text-align:right}@media (max-width:640px){.pend{grid-template-columns:1fr auto}.pend>span:nth-child(1),.pend>span:nth-child(3){display:none}}</style>'
+            f'{lines}<p class="cap" style="margin:8px 0 0">They become normal lines (and go to Review) once the card company makes them final, on a later fetch.</p></details>')
 
 
 def _line(ctx: Ctx, r, cat_opts: str, back: str) -> str:

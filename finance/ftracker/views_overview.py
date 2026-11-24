@@ -252,7 +252,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
     head = f'<div class="pagehead"><h1>Overview</h1><span class="row">{_fetch_button(ctx)}{"" if ctx.readonly else IMPORT_BUTTON}</span></div>{notice}{controls}{importer_ui}'
     if mode != "month":
         return layout(conn, ctx, "/", "Overview", f"{head}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
-    side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _expected_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
+    side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _pending_card(conn, ctx) + _expected_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
     return layout(conn, ctx, "/", "Overview", f'{head}{_dataline(conn, ctx.today)}<div class="ov"><div class="ovmain">{body}</div><aside class="ovside">{side}</aside></div>')
 
 
@@ -282,6 +282,24 @@ def _import_box(ctx) -> str:
     """Drop files right here on the home page. They are read the same way as on the Add statements page."""
     from .views_setup import dropzone
     return dropzone(ctx, compact=True)
+
+
+def _pending_card(conn, ctx) -> str:
+    """Card charges not final yet, from the last fetch. Shown early, never counted."""
+    from . import pending
+    try:
+        rows = pending.current(conn, ctx.today)
+    except sqlite3.Error:
+        return ""
+    if not rows:
+        return ""
+    def amt(r):
+        return money(-r["amount"]) if r["currency"] == "ILS" else esc(f'{-r["amount"]:,.2f} {r["currency"]}')
+    lines = "".join(f'<div class="strow"><span dir="auto">{esc(r["description"])}</span><span class="mono">{amt(r)}</span></div>' for r in rows[:5])
+    more = f'<p class="cap" style="margin:6px 0 0">and {len(rows) - 5} more</p>' if len(rows) > 5 else ""
+    return (f'<a class="card sidecard" href="/transactions#pending" style="display:block;color:inherit;text-decoration:none">'
+            f'<h4>Pending on cards · {money(pending.total(rows))}</h4>{lines}{more}'
+            '<p class="cap" style="margin:8px 0 0">Not final yet, so not counted. They come in as normal lines once final.</p></a>')
 
 
 def _expected_card(conn, ctx) -> str:
