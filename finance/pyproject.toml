@@ -23,7 +23,7 @@ finance = "ftracker.cli:main"
 include = ["ftracker*"]
 
 [tool.setuptools.package-data]
-ftracker = ["schema.sql", "migrations/*.sql", "sheet_sync/Code.gs", "sheet_sync/phone.html"]
+ftracker = ["schema.sql", "migrations/*.sql", "sheet_sync/Code.gs", "sheet_sync/phone.html", "card_scraper_kit/*.js", "card_scraper_kit/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -18,3 +18,7 @@ seed/
 launcher-log.txt
 .setup.lock
 data_fixes.json
+
+# card logins live in the Windows profile; never in the repo
+card-logins*
+card-fetch-status*

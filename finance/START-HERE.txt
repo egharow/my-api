@@ -1,6 +1,7 @@
 FINANCE TRACKER - START HERE (Windows)
 
-Everything stays on your computer. Nothing is sent anywhere except the Google Sheet you choose to link.
+Everything stays on your computer. Nothing is sent anywhere except the Google Sheet you choose to link
+(and, only if you set up Fetch cards, your card companies' own sites when you press Fetch).
 
 1. Install Python (once): go to python.org/downloads, download it, run it, and TICK "Add python to PATH".
 2. Right-click the downloaded zip > Properties > tick "Unblock" > OK.
@@ -21,6 +22,15 @@ Everything stays on your computer. Nothing is sent anywhere except the Google Sh
 
 NEW STATEMENTS (every month)
 Open the app, go to Upload and DRAG the files onto the box. That is all.
+
+FETCH CARDS (optional, instead of downloading card files)
+Fetch cards (in the menu) brings in your card lines straight from Isracard, American Express, Cal and Max.
+1. Install Node.js once: nodejs.org, the "LTS" button, the usual installer. Then Quit and reopen the app.
+2. On the Fetch cards page press Install (once), then add a login for each card company you use.
+3. Press Fetch cards on the Overview whenever you want. New lines wait in Review as usual.
+Your logins are encrypted by Windows for your Windows user and kept in AppData\Local\FinanceTracker,
+outside this folder: updates, my-data and Google Drive never contain them. Forget all logins deletes them.
+If a card company blocks the fetch or asks for an SMS code, import a file for that card as before.
 
 UPDATING THE APP LATER
 The folder has two parts that never mix: "app" (the program) and "my-data" (everything you entered).

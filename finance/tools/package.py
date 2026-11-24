@@ -23,7 +23,18 @@ def crlf(name: str, data: bytes) -> bytes:
     return data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n") if name.endswith((".txt", ".pyw")) else data
 
 
+SECRET_NAMES = ("card-logins", "card-fetch-status")
+
+
+def _no_secrets(names) -> None:
+    """Card logins live in the Windows profile, never in the app. Refuse to build if one ever turns up here."""
+    bad = [n for n in names if any(s in n for s in SECRET_NAMES)] + [str(p) for s in SECRET_NAMES for p in ROOT.rglob(f"{s}*")]
+    if bad:
+        raise SystemExit(f"Refusing to build: card login files found in the app folder: {bad}")
+
+
 def build(out: Path, first_install: bool) -> Path:
+    _no_secrets(tracked())
     path = out / ("FinanceApp.zip" if first_install else "FinanceUpdate.zip")
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         for f in tracked():

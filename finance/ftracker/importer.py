@@ -21,8 +21,8 @@ from .normalize import norm_description
 from .parsers.base import ParsedFile, ParsedStatement, ParsedTxn
 from .parsers.detect import Unrecognised, parse_file
 
-ISSUER_NAMES = {"isracard": "Isracard", "amex": "Amex", "leumi": "Leumi", "cal": "Cal", "onezero": "וואן זירו"}
-SUPPORTED = {".xlsx", ".xls", ".pdf"}
+ISSUER_NAMES = {"isracard": "Isracard", "amex": "Amex", "leumi": "Leumi", "cal": "Cal", "max": "Max", "onezero": "וואן זירו"}
+SUPPORTED = {".xlsx", ".xls", ".pdf", ".json"}          # .json: only what "Fetch cards" writes
 
 
 @dataclass
@@ -70,6 +70,9 @@ def ensure_account(conn: sqlite3.Connection, st: ParsedStatement) -> int:
         return row["id"]
     label = f"{ISSUER_NAMES.get(st.issuer, st.issuer.title())} {st.last4}".strip()
     mine = conn.execute("SELECT id FROM accounts WHERE issuer = 'manual' AND label = ? AND kind = ? AND active = 1", (label, st.account_kind)).fetchone()
+    if not mine and st.account_kind == "card" and st.last4:
+        mine = conn.execute("SELECT id FROM accounts WHERE issuer = 'manual' AND kind = 'card' AND last4 = ? AND active = 1",
+                            (st.last4,)).fetchone()      # a card you added by hand with its last 4 digits
     if mine:                                   # an account you already typed in by hand: this file belongs to it
         conn.execute("UPDATE accounts SET issuer = ?, last4 = ? WHERE id = ?", (st.issuer, st.last4, mine["id"]))
         return mine["id"]
@@ -98,8 +101,21 @@ def _dedupe_key(account_id: int, kind: str, t: ParsedTxn, billing: date | None) 
     return f"{kind}|{account_id}|{t.txn_date}|{norm_description(t.description)}|{t.amount:.2f}|{bal}|{t.voucher or ''}|{billing}"
 
 
+def _other_source_lines(conn, account_id: int, st: ParsedStatement, fetched: bool) -> dict:
+    """Card lines for this card and billing month that came from the other kind of source (fetched from the site vs a
+    downloaded file), counted by (purchase date, amount). The same purchase arriving both ways is then added only once."""
+    if st.account_kind != "card" or not st.billing_date:
+        return {}
+    rows = conn.execute(
+        """SELECT txn_date, ROUND(COALESCE(split_total, amount), 2) AS amt, COUNT(*) AS n FROM transactions
+           WHERE account_id = ? AND substr(billing_date, 1, 7) = ? AND split_of IS NULL
+             AND (COALESCE(source, 'file') = 'fetch') != ?
+           GROUP BY txn_date, amt""", (account_id, st.billing_date.isoformat()[:7], int(fetched))).fetchall()
+    return {(r["txn_date"], r["amt"]): r["n"] for r in rows}
+
+
 def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatement,
-                      account_id: int) -> tuple[int, int, int]:
+                      account_id: int, fetched: bool = False) -> tuple[int, int, int]:
     """Returns (statement_id, new_txns, skipped_txns)."""
     stmt = None
     if st.billing_date:
@@ -107,7 +123,9 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
                             (account_id, st.billing_date.isoformat())).fetchone()
     if stmt:
         statement_id = stmt["id"]
-        if st.stated_total is not None and abs((stmt["stated_total"] or 0) - st.stated_total) > 0.005:
+        if st.stated_total is not None and stmt["stated_total"] is None:
+            conn.execute("UPDATE statements SET stated_total = ? WHERE id = ?", (st.stated_total, statement_id))   # fetched first: the file brings the total
+        elif st.stated_total is not None and abs((stmt["stated_total"] or 0) - st.stated_total) > 0.005:
             dx.raise_item(
                 conn, f"stmt_changed:{statement_id}", "statement_changed",
                 f"A newer file for the same billing date shows a different total "
@@ -128,7 +146,13 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
     chosen = booking.basis(conn)
     mem = categorize.memory(conn)             # read your history once for the whole statement
     split_rules = splits.rules(conn)
+    already = _other_source_lines(conn, account_id, st, fetched)
     for t in st.txns:
+        twin = (t.txn_date.isoformat(), round(t.amount, 2))
+        if already.get(twin):
+            already[twin] -= 1
+            skipped += 1                      # already here from the other source (site fetch vs downloaded file)
+            continue
         if st.account_kind == "bank" and t.balance_after is not None and conn.execute(
                 "SELECT 1 FROM transactions WHERE account_id = ? AND txn_date = ? AND (amount = ? OR split_total = ?) AND balance_after = ?",
                 (account_id, t.txn_date.isoformat(), t.amount, t.amount, t.balance_after)).fetchone():
@@ -144,15 +168,15 @@ def _insert_statement(conn, batch_id: int, source_file_id: int, st: ParsedStatem
                    (batch_id, account_id, statement_id, dedupe_key, txn_date, billing_date, budget_month,
                     description, description_norm, detail, amount, currency, orig_amount, orig_currency,
                     fx_rate, voucher, balance_after, is_recurring, instalment_no, instalment_total,
-                    instalment_full, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    instalment_full, created_at, source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (batch_id, account_id, statement_id, key, t.txn_date.isoformat(),
                  st.billing_date and st.billing_date.isoformat(), month_basis[:7],
                  t.description, norm_description(t.description), t.detail, t.amount, t.currency,
                  t.orig_amount, t.orig_currency,
                  (t.amount / t.orig_amount) if t.orig_amount and t.orig_currency != t.currency else None,
                  t.voucher, t.balance_after, int(t.is_recurring), t.instalment_no, t.instalment_total,
-                 t.instalment_full, now()))
+                 t.instalment_full, now(), "fetch" if fetched else None))
         except sqlite3.IntegrityError:
             skipped += 1
             continue
@@ -169,6 +193,13 @@ def _check_statement(conn, batch_id: int, statement_id: int, st: ParsedStatement
                                 (statement_id,)).fetchone()[0] or 0.0
         conn.execute("UPDATE statements SET computed_total = ? WHERE id = ?", (computed, statement_id))
         fp = f"stmt_total:{statement_id}"
+        if st.stated_total is not None and abs(computed - st.stated_total) > 0.005 and st.billing_date:
+            whole = conn.execute(                  # some lines may have come in earlier from "Fetch cards"
+                "SELECT -SUM(amount) FROM transactions WHERE account_id = (SELECT account_id FROM statements WHERE id = ?) "
+                "AND substr(billing_date, 1, 7) = ?", (statement_id, st.billing_date.isoformat()[:7])).fetchone()[0] or 0.0
+            if abs(whole - st.stated_total) <= 0.005:
+                computed = whole
+                conn.execute("UPDATE statements SET computed_total = ? WHERE id = ?", (computed, statement_id))
         if st.stated_total is not None and abs(computed - st.stated_total) > 0.005:
             dx.raise_item(
                 conn, fp, "statement_total_mismatch",
@@ -258,7 +289,7 @@ def import_inbox(home: Home, conn: sqlite3.Connection, today: date | None = None
             sf_id = cur.lastrowid
             new = skipped = 0
             for st, acct in zip(parsed.statements, account_ids):
-                statement_id, n, s = _insert_statement(conn, batch_id, sf_id, st, acct)
+                statement_id, n, s = _insert_statement(conn, batch_id, sf_id, st, acct, parsed.file_kind == "card_fetch")
                 new += n
                 skipped += s
                 label = conn.execute("SELECT label FROM accounts WHERE id = ?", (acct,)).fetchone()[0]

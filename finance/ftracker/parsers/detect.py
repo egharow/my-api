@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from . import amex, cal, isracard, isracard_pdf, leumi_pdf, leumi_xls, onezero
+from . import amex, cal, cardfetch, isracard, isracard_pdf, leumi_pdf, leumi_xls, onezero
 from .base import ParseError, ParsedFile
 
 
 # Bump this when a reader is added or improved, so files that could not be read before are tried again.
-PARSERS_VERSION = "4"
+PARSERS_VERSION = "5"
 
 
 class Unrecognised(Exception):
@@ -16,6 +16,11 @@ def parse_file(path: Path) -> ParsedFile:
     """Pick the right parser from the file's content. Raises Unrecognised with a reason."""
     ext = path.suffix.lower()
     try:
+        if ext == ".json":
+            d = cardfetch.read(path)
+            if d is None:
+                raise Unrecognised("not a card fetch from this app")
+            return cardfetch.parse(d)
         if ext == ".xlsx":
             rows = isracard.read_rows(path)
             if isracard.looks_like(rows):

@@ -25,6 +25,7 @@ class Ctx:
     starter: bool = False
     can_shortcut: bool = False
     readonly: bool = False          # a phone on the home network: look, never change
+    local: bool = True              # opened on this computer itself (not a phone or another device)
     phone_url: str = ""
     phone_pin: str = ""
     phone_anywhere: str = ""
@@ -401,6 +402,7 @@ NAV = [("/", "Overview"), ("/upload", "Upload"), ("/review", "Review"), ("/recur
 ICONS = {
     "/": "M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z",
     "/review": "M4 12l5 5L20 6",
+    "/cards": "M3 6h18v12H3zM3 10h18M7 15h4",
     "/check": "M4 5h16v14H4zM8 12l3 3 5-6",
     "/transactions": "M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1",
     "/alerts": "M6 17v-6a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
@@ -421,7 +423,7 @@ ICONS = {
 # the sidebar, in groups (a title of None is a group without a heading)
 SIDE_GROUPS = [
     (None, [("/", "Overview"), ("/review", "Review"), ("/check", "Check expenses"), ("/transactions", "Transactions"), ("/alerts", "Alerts")]),
-    ("Bring in", [("/upload", "Add statements"), ("/files", "Statements"), ("/balances", "Balances"), ("/cash", "Cash payments"), ("/close", "Close the month")]),
+    ("Bring in", [("/upload", "Add statements"), ("/cards", "Fetch cards"), ("/files", "Statements"), ("/balances", "Balances"), ("/cash", "Cash payments"), ("/close", "Close the month")]),
     ("Plan", [("/budgets", "Budgets"), ("/recurring", "Recurring"), ("/goals", "Goals"), ("/trips", "Trips"), ("/simulator", "Simulator"), ("/wealth", "Wealth")]),
     (None, [("/setup", "Settings")]),
 ]

@@ -249,7 +249,7 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
         win = months_between(frm, to) if mode == "custom" else [x for x in months if x <= end][-int(mode):]
         body = _period_view(conn, ctx, d, win, owner, base, mode, q)
     importer_ui = "" if ctx.readonly else _import_box(ctx)
-    head = f'<div class="pagehead"><h1>Overview</h1>{"" if ctx.readonly else IMPORT_BUTTON}</div>{notice}{controls}{importer_ui}'
+    head = f'<div class="pagehead"><h1>Overview</h1><span class="row">{_fetch_button(ctx)}{"" if ctx.readonly else IMPORT_BUTTON}</span></div>{notice}{controls}{importer_ui}'
     if mode != "month":
         return layout(conn, ctx, "/", "Overview", f"{head}{_dataline(conn, ctx.today)}{body}{alerts_card(conn, ctx)}{vit}{_tasks(conn, ctx)}")
     side = (_tasks(conn, ctx) + alerts_card(conn, ctx) + _expected_card(conn, ctx) + _statements_card(conn, ctx, m) + _networth_card(conn, ctx) + vit)
@@ -257,6 +257,25 @@ def overview_page(conn: sqlite3.Connection, ctx: Ctx, q: dict, base: str = "/") 
 
 
 IMPORT_BUTTON = '<a class="btnlink strong" href="/upload">Import statements</a>'
+
+
+def _fetch_button(ctx) -> str:
+    """Fetch cards, once a card login is saved. Only on this computer, never on a phone."""
+    if ctx.readonly or not ctx.local:
+        return ""
+    from . import cardfetch, vault
+    from .views import _form
+    try:
+        if not vault.list_logins():
+            return ""
+        pin = vault.has_pin()
+    except vault.VaultError:
+        return ""
+    if cardfetch.JOB.snapshot()["running"]:
+        return '<a class="btnlink" href="/cards#job">Fetching cards…</a> '
+    if pin:
+        return '<a class="btnlink" href="/cards#fetch">Fetch cards</a> '
+    return _form(ctx, "/cards/fetch", '<button class="quiet">Fetch cards</button>', "inline") + " "
 
 
 def _import_box(ctx) -> str:

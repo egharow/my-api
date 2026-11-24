@@ -1,0 +1,8 @@
+{
+  "name": "ftracker-card-fetch",
+  "private": true,
+  "description": "Fetches your own credit card transactions for the Finance app. Installed and run only on your computer.",
+  "dependencies": {
+    "israeli-bank-scrapers": "6.13.0"
+  }
+}

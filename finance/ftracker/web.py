@@ -16,7 +16,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
-from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, splits, regulars, servermode, driveserver
+from . import alerts, appmode, errorlog, booking, ocr, balances, categorize, budgets, cash, closing, cloudbackup, commits, datafixes, firstrun, fx, goals, importer, sheet_import, screens, sheetsync, phone_cloud, starter, summary, trips, watchfolder, uploads, views, views_home, views_budget, views_close, views_files, views_overview, views_recurring, views_screens, views_setup, views_transactions, views_sim, views_trips, views_year, views_trends, views_check, checks, splits, regulars, servermode, driveserver, cardfetch, vault, views_cards
 from . import accounts as accounts_mod
 from . import discrepancies as dx
 from .config import Home, migrate_legacy
@@ -119,6 +119,8 @@ class App:
                               "<body style='font:16px system-ui;max-width:420px;margin:60px auto;padding:0 16px'><h2>View only</h2>"
                               "<p>From a phone you can look at the Overview and Wealth. Changes are made on the computer.</p><p><a href='/'>Back to the overview</a></p>")
 
+        if path.startswith("/cards") and (remote or self.server):
+            return _html(403, views_cards.BLOCKED)                       # card logins: only on the computer itself
         if path == "/health":      # for the launcher: is the app up, and has a window actually loaded it?
             seen = bool(self.watchdog and self.watchdog.last_ping is not None)
             return self._json(200, {"app": appmode.APP_ID, "ok": True, "page_seen": seen})
@@ -143,7 +145,7 @@ class App:
                             flash=flash.split("|", 1)[-1] if flash else "", flash_kind="err" if flash.startswith("err|") else "ok",
                             inbox_count=sum(1 for p in self.home.inbox.iterdir() if p.is_file()) if self.home.inbox.exists() else 0,
                             data_root=str(self.home.root), starter=starter.find(self.app_dir) is not None, can_shortcut=appmode.WINDOWS,
-                            readonly=remote and self.phone, server=self.server, user=session_user or "", closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)), screens_waiting=tuple(screens.waiting_names(self.home)))
+                            readonly=remote and self.phone, local=not remote and not self.server, server=self.server, user=session_user or "", closed=frozenset(closing.closed_months(conn)), tags=tuple((t['id'], t['name']) for t in trips.all_tags(conn)), screens_waiting=tuple(screens.waiting_names(self.home)))
             ph = conn.execute("SELECT value FROM settings WHERE key = 'phone_pin'").fetchone()
             if ph and conn.execute("SELECT value FROM settings WHERE key = 'phone_access'").fetchone():
                 ip = appmode.lan_address()
@@ -261,6 +263,8 @@ class App:
             return _html(200, views_transactions.transactions_page(conn, ctx, q))
         if path == "/check":
             return _html(200, views_check.check_page(conn, ctx, q))
+        if path == "/cards":
+            return _html(200, views_cards.cards_page(conn, ctx, q))
         if path == "/more":
             return _html(200, views_home.more_page(conn, ctx))
         if path in ("/spending", "/trends"):
@@ -418,6 +422,8 @@ class App:
         who = ctx.who or "user"
         if path.startswith("/watch/"):
             back = "/upload"
+        if path.startswith("/cards/"):
+            return self._cards_post(conn, ctx, path, form)
         try:
             if path == "/who":
                 return self._redirect(back, cookies=[("Set-Cookie", f"who={quote(form.get('who', ''))}; Path=/; SameSite=Strict; Max-Age=31536000")])
@@ -943,6 +949,65 @@ class App:
             errorlog.record(self.home, f"{path}", exc)
             return self._redirect(back, errorlog.describe(exc) + " (details are in error-log.txt in your data folder)", err=True)
         return _html(404, "<h1>Not found</h1>")
+
+
+    def _cards_post(self, conn, ctx, path, form) -> Response:
+        """Card logins and Fetch cards. Nothing typed here is ever logged, shown again or written in plain text."""
+        hooks = {"enter": self._busy_on, "leave": self._busy_off}
+        try:
+            if path == "/cards/install":
+                ok = cardfetch.JOB.start_install(hooks)
+                return self._redirect("/cards", "Installing the card scraper. This page shows when it is done." if ok else "Something is already running. Wait for it to finish.", err=not ok)
+            if path == "/cards/save":
+                company, person = form.get("company", ""), form.get("person", "")
+                if person not in ctx.owners and not (not ctx.owners and person == "me"):
+                    return self._redirect("/cards", "Pick whose login this is.", err=True)
+                if company not in cardfetch.COMPANIES:
+                    return self._redirect("/cards", "Pick a card company.", err=True)
+                fields = {k: form.get(f"f_{company}_{k}", "").strip() for k, _ in cardfetch.COMPANIES[company]["fields"]}
+                problem = cardfetch.check_fields(company, fields)
+                if problem:
+                    return self._redirect(f"/cards?edit={quote(vault.login_id(company, person))}#add", problem, err=True)
+                vault.save_login(company, person, fields, form.get("pin") or None)
+                fields = None
+                return self._redirect("/cards", f"{cardfetch.COMPANIES[company]['name']} login for {person} saved, encrypted on this computer.")
+            if path == "/cards/forget":
+                gone = vault.forget(form.get("id", ""))
+                return self._redirect("/cards", "Login forgotten." if gone else "That login was not saved.", err=not gone)
+            if path == "/cards/forget-all":
+                if form.get("sure") != "1":
+                    return self._redirect("/cards", "Tick the box to confirm.", err=True)
+                vault.forget_all()
+                try:
+                    cardfetch._status_path().unlink()
+                except OSError:
+                    pass
+                return self._redirect("/cards", "All card logins were deleted from this computer.")
+            if path == "/cards/pin":
+                had = vault.has_pin()
+                vault.set_pin(form.get("old") or None, form.get("new") or "")
+                return self._redirect("/cards", "Fetch PIN changed." if had and form.get("new") else "Fetch PIN turned off." if had else "Fetch PIN turned on.")
+            if path == "/cards/fetch":
+                if not cardfetch.setup_status()["ready"]:
+                    return self._redirect("/cards", "Finish the setup steps on this page first.", err=True)
+                only = [form["only"]] if form.get("only") else None
+                ok = cardfetch.JOB.start_fetch(self.home, connect, date.fromisoformat(self._today()), form.get("pin") or None, only, hooks)
+                if not ok:
+                    return self._redirect("/cards", "A fetch is already running, or no login is saved yet.", err=True)
+                return self._redirect("/cards#job", "Fetching your cards. This page shows each one as it finishes.")
+        except vault.WrongPin as exc:
+            return self._redirect("/cards", "Wrong fetch PIN." if "PIN" in str(exc) or "pin" in str(exc) else str(exc), err=True)
+        except vault.VaultError as exc:
+            return self._redirect("/cards", str(exc), err=True)
+        except Exception as exc:                          # never logged: a form here can hold a login
+            return self._redirect("/cards", f"That did not work ({type(exc).__name__}).", err=True)
+        return _html(404, "<h1>Not found</h1>")
+
+    def _busy_on(self) -> None:
+        self.active += 1                                   # the app does not close itself while a fetch is running
+
+    def _busy_off(self) -> None:
+        self.active -= 1
 
 
 def serve(home: Home, port: int = 8765, lan: bool = False, pin: str | None = None, open_browser: bool = True,
