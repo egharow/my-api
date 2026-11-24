@@ -33,8 +33,8 @@ RUN_TIMEOUT, INSTALL_TIMEOUT = 600, 900
 NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0
 
 COMPANIES = {
-    "isracard": {"name": "Isracard", "fields": [("id", "ID number (ת.ז.)"), ("card6Digits", "First 6 digits of one of your cards"), ("password", "Password")]},
-    "amex": {"name": "American Express", "fields": [("id", "ID number (ת.ז.)"), ("card6Digits", "First 6 digits of one of your cards"), ("password", "Password")]},
+    "isracard": {"name": "Isracard", "fields": [("id", "ID number (ת.ז.)"), ("card6Digits", "Last 6 digits of one of your cards"), ("password", "Password")]},
+    "amex": {"name": "American Express", "fields": [("id", "ID number (ת.ז.)"), ("card6Digits", "Last 6 digits of one of your cards"), ("password", "Password")]},
     "visaCal": {"name": "Cal", "fields": [("username", "Username"), ("password", "Password")]},
     "max": {"name": "Max", "fields": [("username", "Username"), ("password", "Password")]},
 }
@@ -59,7 +59,7 @@ def check_fields(company: str, fields: dict) -> str | None:
     if "id" in fields and not (fields["id"].strip().isdigit() and 5 <= len(fields["id"].strip()) <= 9):
         return "The ID number should be digits only."
     if "card6Digits" in fields and not (fields["card6Digits"].strip().isdigit() and len(fields["card6Digits"].strip()) == 6):
-        return "Type exactly the first 6 digits of a card."
+        return "Type exactly the last 6 digits of a card."
     return None
 
 
